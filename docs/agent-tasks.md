@@ -8,13 +8,13 @@
 ---
 
 ## Phase 1: Core Domain & Architecture
-- [ ] **TASK-1.1: Core Domain Models**
+- [x] **TASK-1.1: Core Domain Models**
     - **Objective:** Create the foundational data classes.
     - **Inputs:** None.
     - **Outputs:** `Point2D`, `MapBoundary`, `ControlPointType` (Enum), `ControlPoint`, `RouteSegment`, `OptimizedRoute`.
     - **Constraints:** Pure Kotlin. No Android dependencies. Include distance formulas in `Point2D`.
 
-- [ ] **TASK-1.2: Settings Domain**
+- [x] **TASK-1.2: Settings Domain**
     - **Objective:** Create the data structures for user preferences.
     - **Outputs:** `ThemeConfig` (Enum), `LanguageConfig` (Enum), `DistanceUnit` (Enum), `UserPreferences` (Data class).
 
