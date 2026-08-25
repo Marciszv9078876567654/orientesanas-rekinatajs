@@ -32,6 +32,9 @@ private const val DATA_STORE_FILE_NAME = "user_preferences"
  */
 private val Context.dataStore by preferencesDataStore(name = DATA_STORE_FILE_NAME)
 
+private inline fun <reified T : Enum<T>> enumPreference(value: String?, default: T): T =
+    enumValues<T>().firstOrNull { it.name == value } ?: default
+
 /**
  * Single source of truth for [UserPreferences], persisted with Jetpack Preferences DataStore.
  *
@@ -59,10 +62,11 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
         }
         .map { preferences ->
             UserPreferences(
-                themeConfig = ThemeConfig.valueOf(preferences[THEME_KEY] ?: ThemeConfig.SYSTEM.name),
-                language = LanguageConfig.valueOf(preferences[LANG_KEY] ?: LanguageConfig.SYSTEM.name),
+                themeConfig = enumPreference(preferences[THEME_KEY], ThemeConfig.SYSTEM),
+                language = enumPreference(preferences[LANG_KEY], LanguageConfig.SYSTEM),
                 useAnimations = preferences[ANIM_KEY] ?: true,
-                distanceUnit = DistanceUnit.valueOf(preferences[UNIT_KEY] ?: DistanceUnit.METRIC.name),
+                showUsageTips = preferences[USAGE_TIPS_KEY] ?: true,
+                distanceUnit = enumPreference(preferences[UNIT_KEY], DistanceUnit.METRIC),
                 defaultDistanceBudgetKm = preferences[BUDGET_KEY] ?: 15.0f,
             )
         }
@@ -88,6 +92,10 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[ANIM_KEY] = enabled }
     }
 
+    suspend fun updateUsageTips(enabled: Boolean) {
+        dataStore.edit { it[USAGE_TIPS_KEY] = enabled }
+    }
+
     /**
      * Updates the distance display unit ([DistanceUnit]).
      */
@@ -108,6 +116,7 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
         private val THEME_KEY = stringPreferencesKey("theme_config")
         private val LANG_KEY = stringPreferencesKey("language_config")
         private val ANIM_KEY = booleanPreferencesKey("use_animations")
+        private val USAGE_TIPS_KEY = booleanPreferencesKey("show_usage_tips")
         private val UNIT_KEY = stringPreferencesKey("distance_unit")
         private val BUDGET_KEY = floatPreferencesKey("default_budget_km")
 
