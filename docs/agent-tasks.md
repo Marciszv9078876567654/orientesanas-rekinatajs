@@ -21,20 +21,33 @@
 ---
 
 ## Phase 2: Local Storage (Data Layer)
-- [ ] **TASK-2.1: Room DB Entities**
+- [x] **TASK-2.1: Room DB Entities**
     - **Objective:** Define the SQLite tables.
     - **Inputs:** `TASK-1.1` Domain Models.
     - **Outputs:** `ScannedMapEntity`, `ControlPointEntity`.
     - **Constraints:** Use `@Entity`, `@PrimaryKey`, and `@ForeignKey` for relationships.
 
-- [ ] **TASK-2.2: Room DAOs**
+- [x] **TASK-2.2: Room DAOs**
     - **Objective:** Define data access methods.
     - **Outputs:** `MapDao` with basic CRUD operations (insert map, insert points, get map with points using Flow).
+    - **Agent comments (assumptions):**
+        - Added `MapWithPoints` POJO in `data/local/dao` — Room's idiomatic `@Embedded` + `@Relation` carrier required by the "get map with points using Flow" output (not listed in Outputs, but needed to realize it).
+        - "Basic CRUD" interpreted as: inserts (`insertMap`, `insertPoint`, `insertPoints`, atomic `@Transaction insertMapWithPoints`), Flow reads (`observeMapWithPoints`, `observeAllMaps` for the spec.md History feature, `observePoints`), one-shot reads (`getMap`, `getMapWithPoints`), updates (`updateMap`, `updatePoint`, `updatePoints` — supports the spec.md manual correction feature), deletes (`deleteMap` relying on FK cascade, `deletePoint`, `deletePoints`).
+        - `OnConflictStrategy.REPLACE` on inserts: IDs are client-generated UUIDs, so a re-insert of an existing row replaces it instead of throwing.
+        - No `@Database` class was created (strict scope: it is not part of this task's outputs and no task assigns it). The DAO compiles standalone — `:app:compileDebugKotlin` (incl. KSP) verified. The `@Database` class will be needed later to instantiate the DB.
 
-- [ ] **TASK-2.3: Preferences DataStore**
+- [x] **TASK-2.3: Preferences DataStore**
     - **Objective:** Setup Jetpack DataStore for Settings.
     - **Inputs:** `TASK-1.2` Settings Domain.
     - **Outputs:** `PreferencesRepository` exposing a `Flow<UserPreferences>` and suspend update functions.
+    - **Agent comments (assumptions):**
+        - `PreferencesRepository` placed in new package `com.orientesanasrekinatajs.data.preferences` (keeps `data.local` for Room).
+        - Constructor takes `DataStore<Preferences>` per spec.md §5.2 / implementation.md §3.2. No DI framework is configured yet (see TASK-2.2 note), so a `companion object` factory `create(context)` is provided, backed by the standard `preferencesDataStore` delegate (file `user_preferences`) — all created repositories share one lazy singleton store.
+        - "Suspend update functions" interpreted as one per `UserPreferences` property: `updateTheme`, `updateLanguage`, `updateAnimations`, `updateDistanceUnit`, `updateDefaultDistanceBudgetKm`.
+        - `emptyPreferences()` in the spec's `catch` block is the DataStore stdlib function `androidx.datastore.preferences.core.emptyPreferences()` (emits an empty `Preferences`; the downstream `map` turns it into all-default `UserPreferences`). The spec's `IOException` fallback still holds in 1.2.x: `CorruptionException` subclasses `IOException`.
+        - DataStore version: 1.2.1 (latest stable). Note for later tasks: 1.2.x moved the `DataStore` interface to package `androidx.datastore.core` (was `androidx.datastore` in 1.1.x) and the `edit` extension must be imported explicitly from `androidx.datastore.preferences.core`. `datastore-core` is declared explicitly in the version catalog since the app references the `DataStore` type directly.
+        - Budget key name: implementation.md §3.2 uses `default_budget_km`, spec.md §5.2 uses `default_budget`; picked `default_budget_km` to match the `defaultDistanceBudgetKm` property name.
+        - Verified with `:app:compileDebugKotlin` (build passes).
 
 ---
 
