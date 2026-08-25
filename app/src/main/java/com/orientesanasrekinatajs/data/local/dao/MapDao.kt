@@ -1,11 +1,10 @@
 package com.orientesanasrekinatajs.data.local.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 import com.orientesanasrekinatajs.data.local.entity.ControlPointEntity
 import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
 import kotlinx.coroutines.flow.Flow
@@ -31,7 +30,7 @@ interface MapDao {
      *
      * @return the rowid of the inserted row.
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertMap(map: ScannedMapEntity): Long
 
     /**
@@ -39,7 +38,7 @@ interface MapDao {
      *
      * @return the rowid of the inserted row.
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertPoint(point: ControlPointEntity): Long
 
     /**
@@ -47,7 +46,7 @@ interface MapDao {
      *
      * @return the rowids of the inserted rows.
      */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun insertPoints(points: List<ControlPointEntity>): List<Long>
 
     /**
@@ -60,7 +59,21 @@ interface MapDao {
     suspend fun insertMapWithPoints(
         map: ScannedMapEntity,
         points: List<ControlPointEntity>,
-    )
+    ) {
+        insertMap(map)
+        insertPoints(points)
+    }
+
+    /** Replaces a saved route and its point snapshot atomically. */
+    @Transaction
+    suspend fun replaceMapWithPoints(
+        map: ScannedMapEntity,
+        points: List<ControlPointEntity>,
+    ) {
+        deletePoints(map.id)
+        insertMap(map)
+        insertPoints(points)
+    }
 
     // endregion
 
@@ -74,7 +87,7 @@ interface MapDao {
      */
     @Transaction
     @Query("SELECT * FROM scanned_maps WHERE id = :mapId")
-    fun observeMapWithPoints(mapId: String): Flow<MapWithPoints>
+    fun observeMapWithPoints(mapId: String): Flow<MapWithPoints?>
 
     /**
      * One-shot variant of [observeMapWithPoints].
@@ -104,6 +117,9 @@ interface MapDao {
      */
     @Query("SELECT * FROM scanned_maps WHERE id = :mapId")
     suspend fun getMap(mapId: String): ScannedMapEntity?
+
+    @Query("SELECT * FROM scanned_maps ORDER BY timestamp DESC")
+    suspend fun getAllMaps(): List<ScannedMapEntity>
 
     // endregion
 
@@ -149,6 +165,9 @@ interface MapDao {
      */
     @Query("DELETE FROM control_points WHERE mapId = :mapId")
     suspend fun deletePoints(mapId: String)
+
+    @Query("DELETE FROM scanned_maps")
+    suspend fun deleteAllMaps()
 
     // endregion
 }
