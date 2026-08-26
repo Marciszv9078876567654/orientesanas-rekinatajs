@@ -300,7 +300,7 @@ class RoutingViewModel internal constructor(
 
     private companion object {
         const val MAX_LOWER_SCORE_ALTERNATIVES = 3
-        const val MAX_NEXT_LONGEST_ALTERNATIVES = 2
+        const val MAX_NEXT_LONGEST_ALTERNATIVES = 3
         const val DISTANCE_EPSILON = 0.0001f
     }
 }

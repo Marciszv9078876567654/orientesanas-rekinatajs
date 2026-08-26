@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -53,6 +54,7 @@ fun ImageSourceScreen(
     onImageSelected: (Uri) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRecentMaps: () -> Unit = {},
+    onImportRoute: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -158,6 +160,16 @@ fun ImageSourceScreen(
                         Icon(Icons.Default.History, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text(stringResource(R.string.recent_maps))
+                    }
+                    OutlinedButton(
+                        onClick = onImportRoute,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("importRouteButton"),
+                    ) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.import_route))
                     }
                 }
             }

@@ -11,6 +11,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** On-device OCR operations for extracting orienteering control numbers. */
 object OcrUtils {
+    private const val MIN_INPUT_DIMENSION = 32
     private val controlNumberPattern = Regex("""\b\d{2,3}\b""")
     private val recognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -23,6 +24,7 @@ object OcrUtils {
      * bitmap center is returned. This aligns selection with an ROI cropped around a symbol.
      */
     suspend fun extractControlNumber(bitmap: Bitmap): Int? {
+        if (bitmap.width < MIN_INPUT_DIMENSION || bitmap.height < MIN_INPUT_DIMENSION) return null
         val image = InputImage.fromBitmap(bitmap, 0)
         val recognizedText = recognize(image)
         return selectClosestCandidate(recognizedText, bitmap.width, bitmap.height)

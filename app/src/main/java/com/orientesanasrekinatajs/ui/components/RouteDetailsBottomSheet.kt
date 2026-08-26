@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,7 +14,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryScrollableTabRow
@@ -129,6 +132,64 @@ fun RouteDetailsBottomSheet(
             route = selectedRoute,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/** Lightweight route-order editor shell. Drag-and-drop behavior will be added separately. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RouteEditorBottomSheet(
+    route: OptimizedRoute,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+    ) {
+        Text(
+            text = stringResource(R.string.edit_route),
+            style = MaterialTheme.typography.titleLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+        )
+        Text(
+            text = stringResource(R.string.reorder_route_points_placeholder),
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+        )
+        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+            itemsIndexed(
+                items = route.path,
+                key = { index, control -> "$index:${control.id}" },
+            ) { index, control ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = (index + 1).toString(),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Text(
+                        text = when (control.type) {
+                            ControlPointType.START -> "S"
+                            ControlPointType.FINISH -> "F"
+                            ControlPointType.START_FINISH -> "-"
+                            ControlPointType.CONTROL -> control.code.toString()
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = {}, enabled = false) {
+                        Icon(Icons.Default.DragHandle, contentDescription = null)
+                    }
+                }
+                if (index < route.path.lastIndex) HorizontalDivider()
+            }
+        }
     }
 }
 

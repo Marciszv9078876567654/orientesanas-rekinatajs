@@ -46,6 +46,20 @@ class Phase5ImageUtilsTest {
     }
 
     @Test
+    fun cropRegionOfInterestExpandsSmallEdgeCropForMlKit() {
+        val bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+
+        val cropped = ImageCropUtils.cropRegionOfInterest(
+            bitmap = bitmap,
+            center = Point2D(1f, 1f),
+            radius = 4f,
+        )
+
+        assertEquals(32, cropped.width)
+        assertEquals(32, cropped.height)
+    }
+
+    @Test
     fun cropRegionOfInterestRejectsInvalidRadius() {
         val bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
 
@@ -64,6 +78,13 @@ class Phase5ImageUtilsTest {
     @Test
     fun extractControlNumberRejectsSingleDigitText() = runBlocking {
         val bitmap = textBitmap("7")
+
+        assertNull(OcrUtils.extractControlNumber(bitmap))
+    }
+
+    @Test
+    fun extractControlNumberSkipsBitmapBelowMlKitMinimum() = runBlocking {
+        val bitmap = Bitmap.createBitmap(31, 31, Bitmap.Config.ARGB_8888)
 
         assertNull(OcrUtils.extractControlNumber(bitmap))
     }
