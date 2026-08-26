@@ -15,7 +15,7 @@ import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
  */
 @Database(
     entities = [ScannedMapEntity::class, ControlPointEntity::class],
-    version = 4,
+    version = 7,
     exportSchema = false,
 )
 abstract class OrienteeringDatabase : RoomDatabase() {
@@ -35,7 +35,10 @@ abstract class OrienteeringDatabase : RoomDatabase() {
                     context.applicationContext,
                     OrienteeringDatabase::class.java,
                     DATABASE_NAME,
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                ).addMigrations(
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                    MIGRATION_5_6, MIGRATION_6_7,
+                )
                     .build().also { instance = it }
             }
 
@@ -71,6 +74,31 @@ abstract class OrienteeringDatabase : RoomDatabase() {
                 )
                 db.execSQL("ALTER TABLE scanned_maps ADD COLUMN routeBudgetMeters REAL")
                 db.execSQL("ALTER TABLE scanned_maps ADD COLUMN routeTargetScore INTEGER")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE scanned_maps ADD COLUMN alternativeRoutePointIds " +
+                        "TEXT NOT NULL DEFAULT ''",
+                )
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE scanned_maps ADD COLUMN routeMetadataJson " +
+                        "TEXT NOT NULL DEFAULT '{}'",
+                )
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE scanned_maps ADD COLUMN routeIds TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE scanned_maps ADD COLUMN selectedRouteId TEXT NOT NULL DEFAULT ''")
             }
         }
     }

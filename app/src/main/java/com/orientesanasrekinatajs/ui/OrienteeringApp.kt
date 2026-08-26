@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -27,12 +29,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.AddLocationAlt
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -41,18 +45,33 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Map as MapIcon
+import androidx.compose.material.icons.outlined.Map as OutlinedMapIcon
+import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -60,6 +79,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -71,7 +91,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -79,7 +101,9 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -92,10 +116,13 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.verticalScroll
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
 import com.orientesanasrekinatajs.data.local.SavedMapDraft
@@ -105,6 +132,7 @@ import com.orientesanasrekinatajs.domain.model.LanguageConfig
 import com.orientesanasrekinatajs.domain.model.MapBoundary
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.Point2D
+import com.orientesanasrekinatajs.domain.model.RouteMetadata
 import com.orientesanasrekinatajs.domain.model.ThemeConfig
 import com.orientesanasrekinatajs.domain.model.UserPreferences
 import com.orientesanasrekinatajs.ui.components.DistanceCalibrationCanvas
@@ -114,9 +142,12 @@ import com.orientesanasrekinatajs.ui.components.InteractiveControlPointCanvas
 import com.orientesanasrekinatajs.ui.components.RouteDetailsBottomSheet
 import com.orientesanasrekinatajs.ui.components.RouteEditorBottomSheet
 import com.orientesanasrekinatajs.ui.components.RouteRenderingCanvas
+import com.orientesanasrekinatajs.ui.components.RouteRenderLayer
 import com.orientesanasrekinatajs.ui.processing.MapProcessingStage
 import com.orientesanasrekinatajs.ui.processing.MapProcessingUiState
 import com.orientesanasrekinatajs.ui.routing.RouteMode
+import com.orientesanasrekinatajs.ui.routing.RouteManagementAction
+import com.orientesanasrekinatajs.ui.routing.AlternativeRouteCriteria
 import com.orientesanasrekinatajs.ui.routing.RoutingUiState
 import com.orientesanasrekinatajs.ui.savedmaps.SavedMapsEvent
 import com.orientesanasrekinatajs.ui.savedmaps.SavedMapsUiState
@@ -138,12 +169,15 @@ fun OrienteeringApp(
     onAddControlPoint: (ControlPoint) -> Unit,
     onRemoveControlPoint: (String) -> Unit,
     onClearControlPoints: () -> Unit,
+    onInvalidateRoute: () -> Unit,
     onCalculateRoute: (
         pixelsPerMeter: Float,
         mode: RouteMode,
         budgetMeters: Float?,
         targetScore: Int?,
     ) -> Unit,
+    onGenerateAlternativeRoutes: (List<ControlPoint>, Float, AlternativeRouteCriteria) -> Unit,
+    onManageRoutes: (RouteManagementAction) -> Unit,
     onSaveMap: (SavedMapDraft, (ScannedMapEntity) -> Unit) -> Unit,
     onLoadSavedMap: (String) -> Unit,
     onRenameSavedMap: (String, String, (ScannedMapEntity) -> Unit) -> Unit,
@@ -213,7 +247,10 @@ fun OrienteeringApp(
                     onAddControlPoint = onAddControlPoint,
                     onRemoveControlPoint = onRemoveControlPoint,
                     onClearControlPoints = onClearControlPoints,
+                    onInvalidateRoute = onInvalidateRoute,
                     onCalculateRoute = onCalculateRoute,
+                    onGenerateAlternativeRoutes = onGenerateAlternativeRoutes,
+                    onManageRoutes = onManageRoutes,
                     onSaveMap = onSaveMap,
                     onRenameSavedMap = onRenameSavedMap,
                     onDeleteSavedMap = onDeleteSavedMap,
@@ -411,7 +448,10 @@ private fun MapFlowScreen(
     onAddControlPoint: (ControlPoint) -> Unit,
     onRemoveControlPoint: (String) -> Unit,
     onClearControlPoints: () -> Unit,
+    onInvalidateRoute: () -> Unit,
     onCalculateRoute: (Float, RouteMode, Float?, Int?) -> Unit,
+    onGenerateAlternativeRoutes: (List<ControlPoint>, Float, AlternativeRouteCriteria) -> Unit,
+    onManageRoutes: (RouteManagementAction) -> Unit,
     onSaveMap: (SavedMapDraft, (ScannedMapEntity) -> Unit) -> Unit,
     onRenameSavedMap: (String, String, (ScannedMapEntity) -> Unit) -> Unit,
     onDeleteSavedMap: (String, () -> Unit) -> Unit,
@@ -436,10 +476,13 @@ private fun MapFlowScreen(
     }
     var savedMapId by rememberSaveable(sessionKey) { mutableStateOf(processingState.savedMapId) }
     var savedMapName by rememberSaveable(sessionKey) { mutableStateOf(processingState.savedMapName) }
+    var routeEntryKey by rememberSaveable(sessionKey) { mutableIntStateOf(0) }
+    var awaitingRouteGeneration by rememberSaveable(sessionKey) { mutableStateOf(false) }
+    var mapEditChangedSinceEntry by rememberSaveable(sessionKey) { mutableStateOf(false) }
+    var editOpenedFromRoute by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var isDirty by rememberSaveable(sessionKey) {
         mutableStateOf(processingState.savedMapId == null || processingState.savedContentDirty)
     }
-    var editSessionKey by rememberSaveable(sessionKey) { mutableIntStateOf(0) }
     val currentLineStart = lineStart
     val currentLineEnd = lineEnd
     val linePixels = if (currentLineStart != null && currentLineEnd != null) {
@@ -460,21 +503,25 @@ private fun MapFlowScreen(
         if (routingState.route != null) page = MapPage.ROUTE
     }
     BackHandler(enabled = page == MapPage.ROUTE, onBack = onBackHome)
-    val visiblePage = if (page == MapPage.ROUTE && routingState.route != null) MapPage.ROUTE else MapPage.EDIT
+    val visiblePage = page
     val animationsEnabled = LocalAnimationsEnabled.current
+    val defaultRouteName = stringResource(R.string.route)
 
     Crossfade(
         targetState = visiblePage,
         animationSpec = tween(if (animationsEnabled) 180 else 0),
         label = "mapPage",
     ) { targetPage ->
-    if (targetPage == MapPage.ROUTE && routingState.route != null) {
+    if (targetPage == MapPage.ROUTE) {
         RouteScreen(
             bitmap = requireNotNull(processingState.rectifiedBitmap),
-            route = routingState.route,
-            alternativeRoutes = routingState.alternativeRoutes,
-            nextLongestRouteCount = routingState.nextLongestRouteCount,
+            route = routingState.route.takeUnless { awaitingRouteGeneration },
+            alternativeRoutes = routingState.alternativeRoutes.takeUnless { awaitingRouteGeneration }.orEmpty(),
+            nextLongestRouteCount = routingState.nextLongestRouteCount.takeUnless {
+                awaitingRouteGeneration
+            } ?: 0,
             preferredSelectedRoutePointIds = routingState.selectedRoutePointIds,
+            preferredSelectedRouteId = routingState.selectedRouteId,
             allPoints = processingState.controlPoints,
             rotation = rotation,
             onRotationChange = { isDirty = true; onRotationChange(it) },
@@ -483,15 +530,19 @@ private fun MapFlowScreen(
             savedMapId = savedMapId,
             savedMapName = savedMapName,
             isDirty = isDirty,
-            onSave = { selectedRoute ->
+            onSave = { selectedRoute, saveCopy ->
                 effectivePixelsPerMeter?.let { scale ->
+                    routingState.route?.let { primaryRoute ->
+                    val copyName = "${savedMapName?.takeIf(String::isNotBlank) ?: defaultRouteName} - copy"
                     onSaveMap(
                         SavedMapDraft(
                             bitmap = rectified,
                             pixelsPerMeter = scale,
                             points = processingState.controlPoints,
-                            route = routingState.route,
+                            route = primaryRoute,
                             selectedRoute = selectedRoute,
+                            alternativeRoutes = routingState.alternativeRoutes,
+                            routeMetadata = routingState.routeMetadata,
                             routeMode = routingState.mode.name,
                             routeBudgetMeters = routingState.budgetMeters,
                             routeTargetScore = routingState.targetScore,
@@ -499,13 +550,14 @@ private fun MapFlowScreen(
                             lineEnd = lineEnd,
                             lineDistanceMeters = lineMeters,
                             rotationQuarterTurns = rotation,
-                            existingId = savedMapId,
-                            name = savedMapName,
+                            existingId = savedMapId.takeUnless { saveCopy },
+                            name = if (saveCopy) copyName else savedMapName,
                         ),
                     ) { saved ->
                         savedMapId = saved.id
                         savedMapName = saved.name
                         isDirty = false
+                    }
                     }
                 }
             },
@@ -519,44 +571,128 @@ private fun MapFlowScreen(
                 savedMapId?.let { id -> onDeleteSavedMap(id, onBackHome) }
             },
             onEdit = {
-                editSessionKey++
+                mapEditChangedSinceEntry = false
+                editOpenedFromRoute = true
                 page = MapPage.EDIT
             },
             onHome = onBackHome,
+            routeEntryKey = routeEntryKey,
+            isCalculatingRoute = routingState.isCalculating,
+            routeMode = routingState.mode,
+            routeBudgetMeters = routingState.budgetMeters,
+            routeTargetScore = routingState.targetScore,
+            routingError = routingState.error,
+            defaultBudgetMeters = defaultBudgetMeters,
+            canCalculateRoute = effectivePixelsPerMeter != null,
+            onCalculatePrimaryRoute = { mode, budget, targetScore ->
+                isDirty = true
+                awaitingRouteGeneration = false
+                effectivePixelsPerMeter?.let { scale ->
+                    onCalculateRoute(scale, mode, budget, targetScore)
+                }
+            },
+            isGeneratingAlternatives = routingState.isGeneratingAlternatives,
+            onGenerateAlternatives = { criteria ->
+                isDirty = true
+                effectivePixelsPerMeter?.let { scale ->
+                    onGenerateAlternativeRoutes(processingState.controlPoints, scale, criteria)
+                }
+            },
+            routeMetadata = routingState.routeMetadata,
+            onManageRoutes = { action ->
+                isDirty = true
+                onManageRoutes(action)
+            },
         )
     } else {
         EditMapScreen(
             processingState = processingState,
-            routingState = routingState,
-            editSessionKey = editSessionKey,
-            defaultBudgetMeters = defaultBudgetMeters,
             showUsageTips = showUsageTips,
             onUsageTipDismissed = onUsageTipDismissed,
             onApplyBoundary = {
                 isDirty = true
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
                 onApplyEditedBoundary(it, lineStart, lineEnd, lineMeters)
             },
-            onUpdateControlPoint = { isDirty = true; onUpdateControlPoint(it) },
-            onAddControlPoint = { isDirty = true; onAddControlPoint(it) },
-            onRemoveControlPoint = { isDirty = true; onRemoveControlPoint(it) },
-            onClearControlPoints = { isDirty = true; onClearControlPoints() },
-            onCalculateRoute = { scale, mode, budget, targetScore ->
+            onUpdateControlPoint = {
                 isDirty = true
-                onCalculateRoute(scale, mode, budget, targetScore)
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
+                onUpdateControlPoint(it)
+            },
+            onAddControlPoint = {
+                isDirty = true
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
+                onAddControlPoint(it)
+            },
+            onRemoveControlPoint = {
+                isDirty = true
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
+                onRemoveControlPoint(it)
+            },
+            onClearControlPoints = {
+                isDirty = true
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
+                onClearControlPoints()
+            },
+            onOpenRoute = {
+                val needsGeneration = routingState.route == null || mapEditChangedSinceEntry
+                if (needsGeneration) routeEntryKey++
+                awaitingRouteGeneration = needsGeneration
+                editOpenedFromRoute = false
+                page = MapPage.ROUTE
             },
             lineStart = lineStart,
             lineEnd = lineEnd,
             lineDistanceText = lineDistanceText,
-            onLineChange = { start, end -> isDirty = true; lineStart = start; lineEnd = end },
-            onLineDistanceChange = { isDirty = true; lineDistanceText = it },
-            rotation = rotation,
-            onRotationChange = { isDirty = true; onRotationChange(it) },
-            onDiscardChanges = savedMapId?.let { id ->
-                { page = MapPage.ROUTE; onReloadSavedMap(id) }
+            onLineChange = { start, end ->
+                isDirty = true
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
+                lineStart = start
+                lineEnd = end
             },
-            onBack = savedMapId?.let { id ->
-                { page = MapPage.ROUTE; onReloadSavedMap(id) }
-            } ?: onBackHome,
+            onLineDistanceChange = {
+                isDirty = true
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
+                lineDistanceText = it
+            },
+            rotation = rotation,
+            onRotationChange = {
+                isDirty = true
+                mapEditChangedSinceEntry = true
+                onInvalidateRoute()
+                onRotationChange(it)
+            },
+            onCancel = if (editOpenedFromRoute) {
+                {
+                    awaitingRouteGeneration = false
+                    mapEditChangedSinceEntry = false
+                    editOpenedFromRoute = false
+                    page = MapPage.ROUTE
+                    savedMapId?.let(onReloadSavedMap)
+                    Unit
+                }
+            } else {
+                null
+            },
+            onBack = if (editOpenedFromRoute) {
+                {
+                    awaitingRouteGeneration = false
+                    mapEditChangedSinceEntry = false
+                    editOpenedFromRoute = false
+                    page = MapPage.ROUTE
+                    savedMapId?.let(onReloadSavedMap)
+                    Unit
+                }
+            } else {
+                onBackHome
+            },
         )
     }
     }
@@ -565,9 +701,6 @@ private fun MapFlowScreen(
 @Composable
 private fun EditMapScreen(
     processingState: MapProcessingUiState,
-    routingState: RoutingUiState,
-    editSessionKey: Int,
-    defaultBudgetMeters: Float,
     showUsageTips: Boolean,
     onUsageTipDismissed: () -> Unit,
     onApplyBoundary: (MapBoundary) -> Unit,
@@ -575,7 +708,7 @@ private fun EditMapScreen(
     onAddControlPoint: (ControlPoint) -> Unit,
     onRemoveControlPoint: (String) -> Unit,
     onClearControlPoints: () -> Unit,
-    onCalculateRoute: (Float, RouteMode, Float?, Int?) -> Unit,
+    onOpenRoute: () -> Unit,
     lineStart: Point2D?,
     lineEnd: Point2D?,
     lineDistanceText: String,
@@ -583,22 +716,13 @@ private fun EditMapScreen(
     onLineDistanceChange: (String) -> Unit,
     rotation: Int,
     onRotationChange: (Int) -> Unit,
-    onDiscardChanges: (() -> Unit)?,
+    onCancel: (() -> Unit)?,
     onBack: () -> Unit,
 ) {
     val rectified = requireNotNull(processingState.rectifiedBitmap)
     var editMode by rememberSaveable { mutableStateOf(EditMode.CALIBRATION) }
     var editedBoundary by remember(processingState.boundary) { mutableStateOf(processingState.boundary) }
-    var budgetText by rememberSaveable(editSessionKey, defaultBudgetMeters, routingState.budgetMeters) {
-        mutableStateOf((routingState.budgetMeters ?: defaultBudgetMeters).toString())
-    }
-    var targetScoreText by rememberSaveable(editSessionKey, routingState.targetScore) {
-        mutableStateOf((routingState.targetScore ?: 10).toString())
-    }
-    var mode by rememberSaveable(editSessionKey, routingState.mode) {
-        mutableStateOf(routingState.mode)
-    }
-    var dismissedRoutingError by remember { mutableStateOf<String?>(null) }
+    var cornerEditBaseline by remember(processingState.boundary) { mutableStateOf<MapBoundary?>(null) }
     var recenterKey by rememberSaveable { mutableIntStateOf(0) }
     var showHelp by rememberSaveable(processingState.sourceUri?.toString()) { mutableStateOf(showUsageTips) }
     var selectedPointId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -609,6 +733,7 @@ private fun EditMapScreen(
     var confirmPointsClear by rememberSaveable { mutableStateOf(false) }
     var confirmLeaveEdit by rememberSaveable { mutableStateOf(false) }
     var confirmDiscardPointChanges by rememberSaveable { mutableStateOf(false) }
+    var confirmDiscardCornerChanges by rememberSaveable { mutableStateOf(false) }
     var viewportCenterPoint by remember(rectified) {
         mutableStateOf(Point2D(rectified.width / 2f, rectified.height / 2f))
     }
@@ -628,14 +753,17 @@ private fun EditMapScreen(
     } else {
         processingState.savedPixelsPerMeter
     }
-    val routingParametersValid = when (mode) {
-        RouteMode.SHORTEST -> true
-        RouteMode.BEST_SCORE -> budgetText.localizedFloatOrNull()?.let { it > 0f } == true
-        RouteMode.TARGET_SCORE -> targetScoreText.toIntOrNull()?.let { it > 0 } == true
-    }
-
     val visiblePoints = editedPoints ?: processingState.controlPoints
     val pointChangesPending = pointEditBaseline?.let { original -> visiblePoints != original } == true
+    val cornerChangesPending = cornerEditBaseline?.let { original -> editedBoundary != original } == true
+    val discardCornerChanges: () -> Unit = {
+        editedBoundary = cornerEditBaseline ?: processingState.boundary
+        cornerEditBaseline = null
+        editMode = EditMode.CALIBRATION
+    }
+    val requestDiscardCornerChanges: () -> Unit = {
+        if (cornerChangesPending) confirmDiscardCornerChanges = true else discardCornerChanges()
+    }
     val discardPointChanges: () -> Unit = {
         pointEditBaseline = null
         editedPoints = null
@@ -672,7 +800,7 @@ private fun EditMapScreen(
     val requestBack = {
         when (editMode) {
             EditMode.POINTS -> requestDiscardPointChanges()
-            EditMode.CORNERS -> editMode = EditMode.CALIBRATION
+            EditMode.CORNERS -> requestDiscardCornerChanges()
             EditMode.CALIBRATION -> confirmLeaveEdit = true
         }
     }
@@ -776,13 +904,28 @@ private fun EditMapScreen(
             }
 
             when (editMode) {
-                EditMode.CORNERS -> Button(
-                    onClick = {
-                        editedBoundary?.let(onApplyBoundary)
-                        editMode = EditMode.CALIBRATION
-                    },
+                EditMode.CORNERS -> Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                ) { Text(stringResource(R.string.apply_corners)) }
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = requestDiscardCornerChanges,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.discard_changes), textAlign = TextAlign.Center)
+                    }
+                    Button(
+                        onClick = {
+                            val boundaryToApply = editedBoundary.takeIf { cornerChangesPending }
+                            cornerEditBaseline = null
+                            boundaryToApply?.let(onApplyBoundary)
+                            editMode = EditMode.CALIBRATION
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.apply_corners), textAlign = TextAlign.Center)
+                    }
+                }
 
                 EditMode.POINTS -> Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -805,7 +948,11 @@ private fun EditMapScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         OutlinedButton(
-                            onClick = { editMode = EditMode.CORNERS },
+                            onClick = {
+                                cornerEditBaseline = processingState.boundary
+                                editedBoundary = processingState.boundary
+                                editMode = EditMode.CORNERS
+                            },
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Default.CropFree, contentDescription = null)
@@ -850,93 +997,23 @@ private fun EditMapScreen(
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = mode == RouteMode.SHORTEST,
-                                onClick = { mode = RouteMode.SHORTEST },
-                                label = {
-                                    Text(stringResource(R.string.route_mode_shortest), maxLines = 1)
-                                },
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = mode == RouteMode.BEST_SCORE,
-                                onClick = { mode = RouteMode.BEST_SCORE },
-                                label = {
-                                    Text(stringResource(R.string.route_mode_score), maxLines = 1)
-                                },
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = mode == RouteMode.TARGET_SCORE,
-                                onClick = { mode = RouteMode.TARGET_SCORE },
-                                label = {
-                                    Text(stringResource(R.string.route_mode_target_score), maxLines = 1)
-                                },
-                            )
-                        }
-                    }
-                    if (mode == RouteMode.BEST_SCORE) {
-                        OutlinedTextField(
-                            value = budgetText,
-                            onValueChange = { budgetText = it },
-                            label = { Text(stringResource(R.string.distance_budget)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        )
-                    }
-                    if (mode == RouteMode.TARGET_SCORE) {
-                        OutlinedTextField(
-                            value = targetScoreText,
-                            onValueChange = { targetScoreText = it.filter(Char::isDigit).take(5) },
-                            label = { Text(stringResource(R.string.target_score)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        )
-                    }
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        onDiscardChanges?.let { discard ->
-                            OutlinedButton(onClick = discard, modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.discard_changes), textAlign = TextAlign.Center)
+                        onCancel?.let { cancel ->
+                            OutlinedButton(onClick = cancel, modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.cancel), textAlign = TextAlign.Center)
                             }
                         }
                         Button(
-                            enabled = !routingState.isCalculating &&
-                                effectivePixelsPerMeter != null && routingParametersValid,
-                            onClick = {
-                                dismissedRoutingError = null
-                                onCalculateRoute(
-                                    requireNotNull(effectivePixelsPerMeter),
-                                    mode,
-                                    if (mode == RouteMode.BEST_SCORE) budgetText.localizedFloatOrNull() else null,
-                                    if (mode == RouteMode.TARGET_SCORE) targetScoreText.toIntOrNull() else null,
-                                )
-                            },
+                            enabled = effectivePixelsPerMeter != null,
+                            onClick = onOpenRoute,
                             modifier = Modifier.weight(1f),
                         ) {
-                            if (routingState.isCalculating) CircularProgressIndicator(Modifier.height(20.dp))
                             Text(
-                                stringResource(
-                                    if (routingState.isCalculating) {
-                                        R.string.calculating_route
-                                    } else {
-                                        R.string.calculate_route
-                                    },
-                                ),
+                                stringResource(R.string.open_route_view),
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(start = if (routingState.isCalculating) 8.dp else 0.dp),
                             )
                         }
                     }
@@ -981,6 +1058,17 @@ private fun EditMapScreen(
             onDismiss = { confirmDiscardPointChanges = false },
         )
     }
+    if (confirmDiscardCornerChanges) {
+        ConfirmationDialog(
+            title = stringResource(R.string.discard_corner_changes_title),
+            message = stringResource(R.string.discard_corner_changes_confirmation),
+            onConfirm = {
+                confirmDiscardCornerChanges = false
+                discardCornerChanges()
+            },
+            onDismiss = { confirmDiscardCornerChanges = false },
+        )
+    }
 
     selectedPointId?.let { id ->
         visiblePoints.firstOrNull { it.id == id }?.let { point ->
@@ -1010,13 +1098,6 @@ private fun EditMapScreen(
         }
     }
 
-    routingState.error?.takeUnless { it == dismissedRoutingError }?.let { error ->
-        MessageDialog(
-            title = stringResource(R.string.route_error_title),
-            message = error,
-            onDismiss = { dismissedRoutingError = error },
-        )
-    }
     if (confirmLineReset) {
         ConfirmationDialog(
             title = stringResource(R.string.clear_line_title),
@@ -1173,10 +1254,11 @@ private fun controlTypeLabel(type: ControlPointType): String = stringResource(
 @Composable
 private fun RouteScreen(
     bitmap: Bitmap,
-    route: OptimizedRoute,
+    route: OptimizedRoute?,
     alternativeRoutes: List<OptimizedRoute>,
     nextLongestRouteCount: Int,
     preferredSelectedRoutePointIds: List<String>,
+    preferredSelectedRouteId: String?,
     allPoints: List<ControlPoint>,
     rotation: Int,
     onRotationChange: (Int) -> Unit,
@@ -1185,12 +1267,25 @@ private fun RouteScreen(
     savedMapId: String?,
     savedMapName: String?,
     isDirty: Boolean,
-    onSave: (OptimizedRoute) -> Unit,
+    onSave: (OptimizedRoute, Boolean) -> Unit,
     onRouteSelectionChanged: () -> Unit,
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
     onHome: () -> Unit,
+    routeEntryKey: Int,
+    isCalculatingRoute: Boolean,
+    routeMode: RouteMode,
+    routeBudgetMeters: Float?,
+    routeTargetScore: Int?,
+    routingError: String?,
+    defaultBudgetMeters: Float,
+    canCalculateRoute: Boolean,
+    onCalculatePrimaryRoute: (RouteMode, Float?, Int?) -> Unit,
+    isGeneratingAlternatives: Boolean,
+    onGenerateAlternatives: (AlternativeRouteCriteria) -> Unit,
+    routeMetadata: Map<String, RouteMetadata>,
+    onManageRoutes: (RouteManagementAction) -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
@@ -1218,32 +1313,62 @@ private fun RouteScreen(
     var recenterKey by rememberSaveable { mutableIntStateOf(0) }
     var showRename by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showSaveConfirmation by rememberSaveable { mutableStateOf(false) }
     var showUnsavedHomeConfirmation by rememberSaveable { mutableStateOf(false) }
     var showRouteMenu by rememberSaveable { mutableStateOf(false) }
     var showRouteEditor by rememberSaveable { mutableStateOf(false) }
     var showRouteRestrictions by rememberSaveable { mutableStateOf(false) }
+    var showEditMapRouteWarning by rememberSaveable { mutableStateOf(false) }
+    var showManageRoutes by rememberSaveable { mutableStateOf(false) }
+    var showRouteGenerator by rememberSaveable(routeEntryKey) { mutableStateOf(route == null) }
+    var routeGeneratorOpenedFromMenu by rememberSaveable(routeEntryKey) { mutableStateOf(false) }
+    var requestedRouteMode by rememberSaveable { mutableStateOf(routeMode) }
+    var waitingForPrimaryRoute by rememberSaveable { mutableStateOf(false) }
+    var dismissedRoutingError by remember { mutableStateOf<String?>(null) }
+    var showAlternativeRoutes by rememberSaveable { mutableStateOf(false) }
+    var waitingForAlternatives by rememberSaveable { mutableStateOf(false) }
     var renameText by rememberSaveable(savedMapId, savedMapName) { mutableStateOf(savedMapName.orEmpty()) }
     val higherScoreRoutes = alternativeRoutes.take(nextLongestRouteCount)
     val lowerScoreRoutes = alternativeRoutes.drop(nextLongestRouteCount)
-    val availableRoutes = higherScoreRoutes + route + lowerScoreRoutes
-    val primaryRouteIndex = higherScoreRoutes.size
-    val primaryRoutePathKey = route.path.joinToString("|") { it.id }
-    val preferredRoutePathKey = preferredSelectedRoutePointIds
-        .takeIf(List<String>::isNotEmpty)
-        ?.joinToString("|")
-        ?: primaryRoutePathKey
-    val routeSelectionKey = buildString {
-        append(route.path.joinToString(":") { it.id })
-        append('|').append(route.totalScore)
-        append('|').append(route.totalDistanceMeters)
+    val availableRoutes = higherScoreRoutes + listOfNotNull(route) + lowerScoreRoutes
+    val selectableRoutes = availableRoutes.filterNot { routeMetadata[it.id]?.isHidden == true }
+    val preferredRouteId = preferredSelectedRouteId
+        ?.takeIf { selectedId -> selectableRoutes.any { it.id == selectedId } }
+        ?: selectableRoutes.firstOrNull {
+            it.path.map(ControlPoint::id) == preferredSelectedRoutePointIds
+        }?.id
+        ?: selectableRoutes.firstOrNull()?.id.orEmpty()
+    val routeSelectionKey = route?.let { primary ->
+        buildString {
+            append(primary.path.joinToString(":") { it.id })
+            append('|').append(primary.totalScore)
+            append('|').append(primary.totalDistanceMeters)
+        }
+    } ?: "empty-route"
+    var selectedRouteId by rememberSaveable(routeSelectionKey) {
+        mutableStateOf(preferredRouteId)
     }
-    var selectedRoutePathKey by rememberSaveable(routeSelectionKey) {
-        mutableStateOf(preferredRoutePathKey)
+    LaunchedEffect(preferredRouteId, selectableRoutes.map(OptimizedRoute::id)) {
+        selectedRouteId = preferredRouteId
     }
     val safeSelectedRouteIndex = availableRoutes.indexOfFirst { candidate ->
-        candidate.path.joinToString("|") { it.id } == selectedRoutePathKey
-    }.takeIf { it >= 0 } ?: primaryRouteIndex
-    val displayedRoute = availableRoutes[safeSelectedRouteIndex]
+        routeMetadata[candidate.id]?.isHidden != true &&
+        candidate.id == selectedRouteId
+    }.takeIf { it >= 0 } ?: -1
+    val displayedRoute = availableRoutes.getOrNull(safeSelectedRouteIndex)
+    LaunchedEffect(isGeneratingAlternatives) {
+        if (!isGeneratingAlternatives && waitingForAlternatives) {
+            waitingForAlternatives = false
+            showAlternativeRoutes = false
+            showDetails = true
+        }
+    }
+    LaunchedEffect(isCalculatingRoute) {
+        if (!isCalculatingRoute && waitingForPrimaryRoute) {
+            waitingForPrimaryRoute = false
+            showRouteGenerator = false
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -1290,13 +1415,11 @@ private fun RouteScreen(
                     }
                 }
                 Row(Modifier.align(Alignment.CenterEnd)) {
-                    if (isDirty || savedMapId == null) {
-                        IconButton(
-                            onClick = { onSave(displayedRoute) },
-                            enabled = canSave && !isSaving,
-                        ) {
-                            Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_map))
-                        }
+                    IconButton(
+                        onClick = { showSaveConfirmation = true },
+                        enabled = canSave && !isSaving && displayedRoute != null,
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_map))
                     }
                     if (savedMapId != null && !isDirty) {
                         IconButton(onClick = { showDeleteConfirmation = true }) {
@@ -1312,7 +1435,18 @@ private fun RouteScreen(
         Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
             RouteRenderingCanvas(
                 bitmap = bitmap,
-                route = displayedRoute.path,
+                route = displayedRoute?.path.orEmpty(),
+                routeLayers = if (selectableRoutes.isEmpty()) emptyList() else availableRoutes.mapNotNull { candidate ->
+                    val metadata = routeMetadata[candidate.id] ?: RouteMetadata()
+                    val isActive = candidate.id == displayedRoute?.id
+                    if (!isActive && !metadata.isDisplayed) return@mapNotNull null
+                    RouteRenderLayer(
+                        id = candidate.id,
+                        points = candidate.path,
+                        color = routeColor(metadata.colorIndex),
+                        isActive = isActive,
+                    )
+                },
                 allPoints = allPoints,
                 rotationQuarterTurns = rotation,
                 recenterKey = recenterKey,
@@ -1323,17 +1457,39 @@ private fun RouteScreen(
                 onRecenter = { recenterKey++ },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
+            if (isCalculatingRoute) {
+                Surface(
+                    modifier = Modifier.align(Alignment.Center),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                    tonalElevation = 6.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                        Text(
+                            stringResource(R.string.generating_route),
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                }
+            }
         }
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                stringResource(
-                    R.string.route_summary,
-                    displayedRoute.totalDistanceMeters,
-                    displayedRoute.totalScore,
-                ),
+                displayedRoute?.let { selected ->
+                    stringResource(
+                        R.string.route_summary,
+                        selected.totalDistanceMeters,
+                        selected.totalScore,
+                    )
+                } ?: stringResource(R.string.no_route_generated),
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
             )
@@ -1367,12 +1523,22 @@ private fun RouteScreen(
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.edit_map)) },
                                         leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                        onClick = { showRouteMenu = false; onEdit() },
+                                        onClick = {
+                                            showRouteMenu = false
+                                            if (route != null) showEditMapRouteWarning = true else onEdit()
+                                        },
                                     )
+                                    HorizontalDivider()
                                     DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.edit_route)) },
-                                        leadingIcon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) },
-                                        onClick = { showRouteMenu = false; showRouteEditor = true },
+                                        text = { Text(stringResource(R.string.generate_route)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Route, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showRouteMenu = false
+                                            routeGeneratorOpenedFromMenu = true
+                                            showRouteGenerator = true
+                                        },
                                     )
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.route_restrictions)) },
@@ -1385,6 +1551,36 @@ private fun RouteScreen(
                                         },
                                     )
                                     DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.alternative_routes)) },
+                                        enabled = route != null && availableRoutes.any {
+                                            routeMetadata[it.id]?.isHidden != true
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.AutoMirrored.Filled.AltRoute, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showRouteMenu = false
+                                            showAlternativeRoutes = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.edit_route)) },
+                                        leadingIcon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) },
+                                        onClick = { showRouteMenu = false; showRouteEditor = true },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.manage_routes)) },
+                                        enabled = route != null || alternativeRoutes.isNotEmpty(),
+                                        leadingIcon = {
+                                            Icon(Icons.AutoMirrored.Filled.ListAlt, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showRouteMenu = false
+                                            showManageRoutes = true
+                                        },
+                                    )
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
                                         text = { Text(stringResource(R.string.export_route)) },
                                         leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                                         onClick = { showRouteMenu = false },
@@ -1396,6 +1592,9 @@ private fun RouteScreen(
                 }
                 OutlinedButton(
                     onClick = { showDetails = true },
+                    enabled = route != null && availableRoutes.any {
+                        routeMetadata[it.id]?.isHidden != true
+                    },
                     modifier = Modifier.weight(1f).height(48.dp),
                 ) {
                     Text(stringResource(R.string.show_route_details))
@@ -1404,23 +1603,26 @@ private fun RouteScreen(
         }
     }
 
-    if (showDetails) {
+    if (showDetails && route != null && availableRoutes.any {
+        routeMetadata[it.id]?.isHidden != true
+    }) {
         RouteDetailsBottomSheet(
             route = route,
             alternativeRoutes = alternativeRoutes,
             nextLongestRouteCount = nextLongestRouteCount,
-            selectedRouteIndex = safeSelectedRouteIndex,
-            onRouteSelected = { index ->
-                val newPathKey = availableRoutes[index].path.joinToString("|") { it.id }
-                if (newPathKey != selectedRoutePathKey) {
-                    selectedRoutePathKey = newPathKey
+            routeMetadata = routeMetadata,
+            selectedRouteId = selectedRouteId,
+            onRouteSelected = { newRouteId ->
+                if (newRouteId != selectedRouteId) {
+                    selectedRouteId = newRouteId
+                    onManageRoutes(RouteManagementAction.Select(newRouteId))
                     onRouteSelectionChanged()
                 }
             },
             onDismissRequest = { showDetails = false },
         )
     }
-    if (showRouteEditor) {
+    if (showRouteEditor && displayedRoute != null) {
         RouteEditorBottomSheet(
             route = displayedRoute,
             onDismissRequest = { showRouteEditor = false },
@@ -1452,6 +1654,67 @@ private fun RouteScreen(
                     Text(stringResource(R.string.close))
                 }
             },
+        )
+    }
+    if (showAlternativeRoutes && route != null && availableRoutes.any {
+        routeMetadata[it.id]?.isHidden != true
+    }) {
+        AlternativeRoutesDialog(
+            routes = availableRoutes,
+            initialSourceRouteId = displayedRoute?.id ?: route.id,
+            routeMetadata = routeMetadata,
+            onSourceSelected = { newRouteId ->
+                if (newRouteId != selectedRouteId) {
+                    selectedRouteId = newRouteId
+                    onManageRoutes(RouteManagementAction.Select(newRouteId))
+                    onRouteSelectionChanged()
+                }
+            },
+            isGenerating = isGeneratingAlternatives,
+            onGenerate = { criteria ->
+                waitingForAlternatives = true
+                onGenerateAlternatives(criteria)
+            },
+            onDismiss = { showAlternativeRoutes = false },
+        )
+    }
+    if (showRouteGenerator) {
+        RouteGenerationDialog(
+            initialMode = requestedRouteMode,
+            initialBudgetMeters = routeBudgetMeters ?: defaultBudgetMeters,
+            initialTargetScore = routeTargetScore ?: 10,
+            isCalculating = isCalculatingRoute,
+            canCalculate = canCalculateRoute,
+            dismissAsCancel = routeGeneratorOpenedFromMenu,
+            onGenerate = { mode, budget, targetScore ->
+                dismissedRoutingError = null
+                requestedRouteMode = mode
+                showRouteGenerator = false
+                waitingForPrimaryRoute = true
+                onCalculatePrimaryRoute(mode, budget, targetScore)
+            },
+            onDismiss = { if (!isCalculatingRoute) showRouteGenerator = false },
+        )
+    }
+    if (showEditMapRouteWarning) {
+        ConfirmationDialog(
+            title = stringResource(R.string.edit_map_removes_route_title),
+            message = stringResource(R.string.edit_map_removes_route_confirmation),
+            onConfirm = {
+                showEditMapRouteWarning = false
+                onEdit()
+            },
+            onDismiss = { showEditMapRouteWarning = false },
+        )
+    }
+    if (showManageRoutes) {
+        ManageRoutesDialog(
+            primaryRoute = route,
+            alternativeRoutes = alternativeRoutes,
+            primaryRouteIndex = nextLongestRouteCount,
+            routeMetadata = routeMetadata,
+            onAction = onManageRoutes,
+            onDismiss = { showManageRoutes = false },
         )
     }
     if (showRename) {
@@ -1494,6 +1757,834 @@ private fun RouteScreen(
             onDismiss = { showUnsavedHomeConfirmation = false },
         )
     }
+    if (showSaveConfirmation && displayedRoute != null) {
+        AlertDialog(
+            onDismissRequest = { if (!isSaving) showSaveConfirmation = false },
+            title = { CenteredDialogTitle(stringResource(R.string.save_map_confirmation_title)) },
+            text = { Text(stringResource(R.string.save_map_confirmation_message)) },
+            confirmButton = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = {
+                            showSaveConfirmation = false
+                            onSave(displayedRoute, true)
+                        },
+                        enabled = !isSaving,
+                    ) { Text(stringResource(R.string.save_copy)) }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(
+                        onClick = { showSaveConfirmation = false },
+                        enabled = !isSaving,
+                    ) { Text(stringResource(R.string.cancel)) }
+                    TextButton(
+                        onClick = {
+                            showSaveConfirmation = false
+                            onSave(displayedRoute, false)
+                        },
+                        enabled = !isSaving,
+                    ) { Text(stringResource(R.string.save)) }
+                }
+            },
+        )
+    }
+    routingError?.takeUnless { it == dismissedRoutingError }?.let { error ->
+        MessageDialog(
+            title = stringResource(R.string.route_error_title),
+            message = error,
+            onDismiss = { dismissedRoutingError = error },
+        )
+    }
+}
+
+@Composable
+private fun RouteGenerationDialog(
+    initialMode: RouteMode,
+    initialBudgetMeters: Float,
+    initialTargetScore: Int,
+    isCalculating: Boolean,
+    canCalculate: Boolean,
+    dismissAsCancel: Boolean,
+    onGenerate: (RouteMode, Float?, Int?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    var mode by rememberSaveable(initialMode) { mutableStateOf(initialMode) }
+    var budgetText by rememberSaveable(initialBudgetMeters) { mutableStateOf(initialBudgetMeters.toString()) }
+    var targetScoreText by rememberSaveable(initialTargetScore) { mutableStateOf(initialTargetScore.toString()) }
+    val budget = budgetText.localizedFloatOrNull()
+    val targetScore = targetScoreText.toIntOrNull()
+    val parametersValid = when (mode) {
+        RouteMode.SHORTEST -> true
+        RouteMode.BEST_SCORE -> budget?.let { it > 0f } == true
+        RouteMode.TARGET_SCORE -> targetScore?.let { it > 0 } == true
+    }
+    AlertDialog(
+        onDismissRequest = { if (!isCalculating) onDismiss() },
+        modifier = Modifier.clearFocusOnPointerDown(focusManager),
+        text = {
+            Column(
+                modifier = Modifier.clearFocusOnPointerDown(focusManager),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.choose_route_generation),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    RouteMode.entries.forEach { option ->
+                        FilterChip(
+                            selected = mode == option,
+                            onClick = { mode = option },
+                            enabled = !isCalculating,
+                            label = {
+                                Text(
+                                    routeModeLabel(option),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                if (mode == RouteMode.BEST_SCORE) {
+                    OutlinedTextField(
+                        value = budgetText,
+                        onValueChange = { budgetText = it },
+                        label = { Text(stringResource(R.string.distance_budget), color = Color.White) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        enabled = !isCalculating,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (mode == RouteMode.TARGET_SCORE) {
+                    OutlinedTextField(
+                        value = targetScoreText,
+                        onValueChange = { targetScoreText = it.filter(Char::isDigit).take(5) },
+                        label = { Text(stringResource(R.string.target_score), color = Color.White) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        enabled = !isCalculating,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (isCalculating) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.5.dp)
+                        Text(
+                            stringResource(R.string.generating_route),
+                            modifier = Modifier.padding(start = 10.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onGenerate(
+                        mode,
+                        budget.takeIf { mode == RouteMode.BEST_SCORE },
+                        targetScore.takeIf { mode == RouteMode.TARGET_SCORE },
+                    )
+                },
+                enabled = canCalculate && parametersValid && !isCalculating,
+            ) {
+                if (isCalculating) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(stringResource(R.string.generate_route))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isCalculating) {
+                Text(stringResource(if (dismissAsCancel) R.string.cancel else R.string.skip))
+            }
+        },
+    )
+}
+
+@Composable
+private fun routeModeLabel(mode: RouteMode): String = stringResource(
+    when (mode) {
+        RouteMode.SHORTEST -> R.string.route_mode_shortest
+        RouteMode.BEST_SCORE -> R.string.route_mode_score
+        RouteMode.TARGET_SCORE -> R.string.route_mode_target_score
+    },
+)
+
+@Composable
+internal fun ManageRoutesDialog(
+    primaryRoute: OptimizedRoute?,
+    alternativeRoutes: List<OptimizedRoute>,
+    primaryRouteIndex: Int,
+    routeMetadata: Map<String, RouteMetadata>,
+    onAction: (RouteManagementAction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val routes = primaryRoute?.let { primary ->
+        val safePrimaryIndex = primaryRouteIndex.coerceIn(0, alternativeRoutes.size)
+        alternativeRoutes.take(safePrimaryIndex) + primary + alternativeRoutes.drop(safePrimaryIndex)
+    } ?: alternativeRoutes
+    val initialRouteKeys = routes.map(OptimizedRoute::id)
+    val primaryKey = primaryRoute?.id
+    val defaultNames = routes.map { route ->
+        route.id to managedRouteDefaultName(
+            route = route,
+            primaryRoute = primaryRoute,
+            isPrimary = route.id == primaryKey,
+        )
+    }.toMap()
+    val initialMetadata = initialRouteKeys.associateWith { key ->
+        val metadata = routeMetadata[key] ?: RouteMetadata()
+        metadata.copy(name = metadata.name.ifBlank { defaultNames.getValue(key) })
+    }
+    var managedRoutes by remember(initialRouteKeys) { mutableStateOf(routes) }
+    var managedMetadata by remember(initialRouteKeys, routeMetadata) { mutableStateOf(initialMetadata) }
+    var showDeleteUnstarredConfirmation by remember { mutableStateOf(false) }
+    var showDiscardConfirmation by remember { mutableStateOf(false) }
+    var focusedRouteKey by remember { mutableStateOf<String?>(null) }
+    var openMenuRouteKey by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteRouteKey by remember { mutableStateOf<String?>(null) }
+    val hasUnsavedChanges = managedRoutes.map(OptimizedRoute::id) != initialRouteKeys ||
+        managedMetadata != initialMetadata
+    LaunchedEffect(focusedRouteKey) {
+        if (focusedRouteKey == null) keyboardController?.hide()
+    }
+    fun clearInputFocus() {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+        focusedRouteKey = null
+    }
+    fun requestCancel() {
+        clearInputFocus()
+        if (hasUnsavedChanges) showDiscardConfirmation = true else onDismiss()
+    }
+    Dialog(
+        onDismissRequest = {
+            if (focusedRouteKey != null) clearInputFocus() else requestCancel()
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("manage_routes_dialog_background")
+                .pointerInput(focusManager) {
+                    awaitEachGesture {
+                        awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial,
+                        )
+                        focusManager.clearFocus(force = true)
+                    }
+                }
+                .safeDrawingPadding()
+                .padding(horizontal = 28.dp, vertical = 20.dp),
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 560.dp),
+            ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.manage_routes),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    managedRoutes.forEachIndexed { index, managedRoute ->
+                        val key = managedRoute.id
+                        val metadata = managedMetadata.getValue(key)
+                        val duplicateName = stringResource(R.string.route_copy_name, metadata.name)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(routeColor(metadata.colorIndex).copy(alpha = 0.14f))
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Box(
+                                Modifier
+                                    .width(7.dp)
+                                    .height(56.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(routeColor(metadata.colorIndex)),
+                            )
+                            OutlinedTextField(
+                                value = metadata.name,
+                                onValueChange = { name ->
+                                    managedMetadata = managedMetadata +
+                                        (key to metadata.copy(name = name.take(60)))
+                                },
+                                label = { Text(stringResource(R.string.route_name), color = Color.White) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .offset(y = (-4).dp)
+                                    .testTag("managed_route_name_$index")
+                                    .onFocusChanged { state ->
+                                        if (state.isFocused) {
+                                            focusedRouteKey = key
+                                        } else if (focusedRouteKey == key) {
+                                            focusedRouteKey = null
+                                        }
+                                    },
+                            )
+                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                            Column(
+                                modifier = Modifier.fillMaxHeight(),
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        clearInputFocus()
+                                        managedRoutes = managedRoutes.toMutableList().also { items ->
+                                            items[index] = items[index - 1]
+                                            items[index - 1] = managedRoute
+                                        }
+                                    },
+                                    enabled = index > 0,
+                                    modifier = Modifier.size(28.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowUpward,
+                                        contentDescription = stringResource(R.string.move_route_up),
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        clearInputFocus()
+                                        managedRoutes = managedRoutes.toMutableList().also { items ->
+                                            items[index] = items[index + 1]
+                                            items[index + 1] = managedRoute
+                                        }
+                                    },
+                                    enabled = index < managedRoutes.lastIndex,
+                                    modifier = Modifier.size(28.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowDownward,
+                                        contentDescription = stringResource(R.string.move_route_down),
+                                    )
+                                }
+                            }
+                            }
+                            Box {
+                                IconButton(onClick = { clearInputFocus(); openMenuRouteKey = key }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.route_actions))
+                                }
+                                DropdownMenu(
+                                    expanded = openMenuRouteKey == key,
+                                    onDismissRequest = { openMenuRouteKey = null },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(if (metadata.isStarred) R.string.unstar_route else R.string.star_route)) },
+                                        leadingIcon = { Icon(if (metadata.isStarred) Icons.Default.Star else Icons.Default.StarBorder, null) },
+                                        onClick = {
+                                            managedMetadata = managedMetadata + (key to metadata.copy(isStarred = !metadata.isStarred))
+                                            openMenuRouteKey = null
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.duplicate_route)) },
+                                        leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                                        onClick = {
+                                            val duplicate = managedRoute.copy(id = java.util.UUID.randomUUID().toString())
+                                            managedRoutes = managedRoutes.toMutableList().also { it.add(index + 1, duplicate) }
+                                            val nextColor = ((managedMetadata.values.maxOfOrNull(RouteMetadata::colorIndex) ?: -1) + 1) % 10
+                                            managedMetadata = managedMetadata + (duplicate.id to metadata.copy(
+                                                name = duplicateName.take(60), isStarred = false,
+                                                colorIndex = nextColor, isDisplayed = false,
+                                            ))
+                                            openMenuRouteKey = null
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(if (metadata.isHidden) R.string.unhide_route else R.string.hide_route)) },
+                                        leadingIcon = { Icon(if (metadata.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, null) },
+                                        onClick = {
+                                            managedMetadata = managedMetadata + (key to metadata.copy(isHidden = !metadata.isHidden))
+                                            openMenuRouteKey = null
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(if (metadata.isDisplayed) R.string.remove_route_from_map else R.string.display_route_on_map)) },
+                                        leadingIcon = {
+                                            Icon(
+                                                if (metadata.isDisplayed) Icons.Default.MapIcon
+                                                else Icons.Outlined.OutlinedMapIcon,
+                                                null,
+                                            )
+                                        },
+                                        onClick = {
+                                            managedMetadata = managedMetadata + (key to metadata.copy(isDisplayed = !metadata.isDisplayed))
+                                            openMenuRouteKey = null
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.delete_route)) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, null) },
+                                        enabled = !metadata.isStarred,
+                                        onClick = { pendingDeleteRouteKey = key; openMenuRouteKey = null },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (managedRoutes.isEmpty()) {
+                        Text(
+                            stringResource(R.string.no_routes_to_manage),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    HorizontalDivider()
+                    OutlinedButton(
+                        onClick = {
+                            clearInputFocus()
+                            showDeleteUnstarredConfirmation = true
+                        },
+                        enabled = managedRoutes.any { managedMetadata[it.id]?.isStarred != true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = null)
+                        Text(
+                            stringResource(R.string.delete_all_unstarred_routes),
+                            modifier = Modifier.padding(start = 6.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = ::requestCancel) { Text(stringResource(R.string.cancel)) }
+                    TextButton(
+                        onClick = {
+                            clearInputFocus()
+                            onAction(
+                                RouteManagementAction.Apply(
+                                    orderedRoutes = managedRoutes,
+                                    metadata = managedMetadata.mapValues { (key, metadata) ->
+                                        metadata.copy(order = managedRoutes.indexOfFirst { it.id == key })
+                                    },
+                                ),
+                            )
+                            onDismiss()
+                        },
+                    ) { Text(stringResource(R.string.save)) }
+                }
+            }
+            }
+        }
+    }
+    if (showDeleteUnstarredConfirmation) {
+        ConfirmationDialog(
+            title = stringResource(R.string.delete_unstarred_routes_title),
+            message = stringResource(R.string.delete_unstarred_routes_confirmation),
+            onConfirm = {
+                showDeleteUnstarredConfirmation = false
+                val starredKeys = managedRoutes.map(OptimizedRoute::id)
+                    .filter { key -> managedMetadata[key]?.isStarred == true }
+                managedRoutes = managedRoutes.filter { it.id in starredKeys }
+                managedMetadata = managedMetadata.filterKeys(starredKeys.toSet()::contains)
+            },
+            onDismiss = { showDeleteUnstarredConfirmation = false },
+        )
+    }
+    pendingDeleteRouteKey?.let { routeKey ->
+        ConfirmationDialog(
+            title = stringResource(R.string.delete_route_title),
+            message = stringResource(
+                R.string.delete_route_confirmation,
+                managedMetadata[routeKey]?.name.orEmpty(),
+            ),
+            onConfirm = {
+                pendingDeleteRouteKey = null
+                managedRoutes = managedRoutes.filterNot { it.id == routeKey }
+                managedMetadata = managedMetadata - routeKey
+            },
+            onDismiss = { pendingDeleteRouteKey = null },
+        )
+    }
+    if (showDiscardConfirmation) {
+        ConfirmationDialog(
+            title = stringResource(R.string.discard_route_management_changes_title),
+            message = stringResource(R.string.discard_route_management_changes_confirmation),
+            onConfirm = {
+                showDiscardConfirmation = false
+                onDismiss()
+            },
+            onDismiss = { showDiscardConfirmation = false },
+        )
+    }
+}
+
+@Composable
+private fun managedRouteDefaultName(
+    route: OptimizedRoute,
+    primaryRoute: OptimizedRoute?,
+    isPrimary: Boolean,
+): String {
+    if (isPrimary || primaryRoute == null) return stringResource(R.string.primary_route_tab)
+    val difference = route.totalScore - primaryRoute.totalScore
+    return when {
+        difference > 0 -> androidx.compose.ui.res.pluralStringResource(
+            R.plurals.more_score_points_route_tab,
+            difference,
+            difference,
+        )
+        difference < 0 -> androidx.compose.ui.res.pluralStringResource(
+            R.plurals.fewer_score_points_route_tab,
+            -difference,
+            -difference,
+        )
+        else -> stringResource(R.string.zero_score_points_route_tab)
+    }
+}
+
+private fun routeColor(index: Int): Color = listOf(
+    0xFF455A64, 0xFF3F51B5, 0xFF009688, 0xFFFF9800, 0xFF9C27B0,
+    0xFF03A9F4, 0xFF8BC34A, 0xFFFF5722, 0xFF795548, 0xFF607D8B,
+).let { Color(it[index.mod(it.size)]) }
+
+@Composable
+private fun AlternativeRoutesDialog(
+    routes: List<OptimizedRoute>,
+    initialSourceRouteId: String,
+    routeMetadata: Map<String, RouteMetadata>,
+    onSourceSelected: (String) -> Unit,
+    isGenerating: Boolean,
+    onGenerate: (AlternativeRouteCriteria) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    val selectableRoutes = routes.filterNot { routeMetadata[it.id]?.isHidden == true }
+    var sourceRouteId by rememberSaveable(initialSourceRouteId, selectableRoutes.map(OptimizedRoute::id)) {
+        mutableStateOf(
+            initialSourceRouteId.takeIf { initial -> selectableRoutes.any { it.id == initial } }
+                ?: selectableRoutes.first().id,
+        )
+    }
+    var sourceMenuExpanded by remember { mutableStateOf(false) }
+    val sourceRoute = selectableRoutes.firstOrNull { it.id == sourceRouteId } ?: selectableRoutes.first()
+    var countText by rememberSaveable { mutableStateOf("3") }
+    var minDistanceText by rememberSaveable { mutableStateOf("") }
+    var maxDistanceText by rememberSaveable { mutableStateOf("") }
+    var minScoreText by rememberSaveable { mutableStateOf("") }
+    var maxScoreText by rememberSaveable { mutableStateOf("") }
+    var useRelativeValues by rememberSaveable { mutableStateOf(false) }
+    val count = countText.toIntOrNull()
+    val minDistance = minDistanceText.localizedFloatOrNull()
+    val maxDistance = maxDistanceText.localizedFloatOrNull()
+    val minScore = minScoreText.toIntOrNull()
+    val maxScore = maxScoreText.toIntOrNull()
+    val fieldsValid = count != null && count in 1..20 &&
+        (minDistanceText.isBlank() || minDistance != null) &&
+        (maxDistanceText.isBlank() || maxDistance != null) &&
+        (minScoreText.isBlank() || minScore != null) &&
+        (maxScoreText.isBlank() || maxScore != null)
+    val resolvedMinDistance = minDistance?.let {
+        if (useRelativeValues) sourceRoute.totalDistanceMeters - it else it
+    }
+    val resolvedMaxDistance = maxDistance?.let {
+        if (useRelativeValues) sourceRoute.totalDistanceMeters + it else it
+    }
+    val resolvedMinScore = minScore?.let { if (useRelativeValues) sourceRoute.totalScore - it else it }
+    val resolvedMaxScore = maxScore?.let { if (useRelativeValues) sourceRoute.totalScore + it else it }
+    val boundsValid = (resolvedMinDistance == null || resolvedMaxDistance == null ||
+        resolvedMinDistance <= resolvedMaxDistance) &&
+        (resolvedMinScore == null || resolvedMaxScore == null || resolvedMinScore <= resolvedMaxScore)
+
+    AlertDialog(
+        onDismissRequest = { if (!isGenerating) onDismiss() },
+        modifier = Modifier.clearFocusOnPointerDown(focusManager),
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState())
+                    .clearFocusOnPointerDown(focusManager),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.alternative_routes),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { sourceMenuExpanded = true },
+                        enabled = !isGenerating,
+                        modifier = Modifier
+                            .fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor =
+                                routeColor(routeMetadata[sourceRoute.id]?.colorIndex ?: 0)
+                                    .copy(alpha = 0.22f),
+                        ),
+                    ) {
+                        Box(
+                            Modifier
+                                .width(6.dp)
+                                .height(24.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(routeColor(routeMetadata[sourceRoute.id]?.colorIndex ?: 0)),
+                        )
+                        Text(
+                            routeMetadata[sourceRoute.id]?.name?.ifBlank { null }
+                                ?: managedRouteDefaultName(sourceRoute, routes.firstOrNull(), sourceRoute == routes.firstOrNull()),
+                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = sourceMenuExpanded,
+                        onDismissRequest = { sourceMenuExpanded = false },
+                    ) {
+                        selectableRoutes.forEach { candidate ->
+                            DropdownMenuItem(
+                                modifier = Modifier
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        routeColor(routeMetadata[candidate.id]?.colorIndex ?: 0)
+                                            .copy(alpha = if (candidate.id == sourceRoute.id) 0.24f else 0.10f),
+                                    ),
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            Modifier
+                                                .width(6.dp)
+                                                .height(28.dp)
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(
+                                                    routeColor(routeMetadata[candidate.id]?.colorIndex ?: 0),
+                                                ),
+                                        )
+                                        Text(
+                                            routeMetadata[candidate.id]?.name?.ifBlank { null }
+                                                ?: managedRouteDefaultName(
+                                                    candidate, routes.firstOrNull(), candidate == routes.firstOrNull(),
+                                                ),
+                                            modifier = Modifier.padding(start = 8.dp),
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    sourceRouteId = candidate.id
+                                    sourceMenuExpanded = false
+                                    onSourceSelected(candidate.id)
+                                },
+                            )
+                        }
+                    }
+                }
+                Text(
+                    stringResource(
+                        R.string.alternative_routes_primary_summary,
+                        sourceRoute.totalDistanceMeters,
+                        sourceRoute.totalScore,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider()
+                OutlinedTextField(
+                    value = countText,
+                    onValueChange = { countText = it.filter(Char::isDigit).take(2) },
+                    label = { Text(stringResource(R.string.number_of_routes), color = Color.White) },
+                    supportingText = { Text(stringResource(R.string.number_of_routes_range)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    enabled = !isGenerating,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.use_relative_values),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White,
+                        )
+                    }
+                    Switch(
+                        checked = useRelativeValues,
+                        onCheckedChange = { useRelativeValues = it },
+                        enabled = !isGenerating,
+                    )
+                }
+                HorizontalDivider()
+                Text(
+                    stringResource(R.string.distance_bounds),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                )
+                AlternativeCriterionField(
+                    value = minDistanceText,
+                    onValueChange = { minDistanceText = it },
+                    label = stringResource(
+                        if (useRelativeValues) R.string.distance_under_meters
+                        else R.string.minimum_distance_meters,
+                    ),
+                    enabled = !isGenerating,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                AlternativeCriterionField(
+                    value = maxDistanceText,
+                    onValueChange = { maxDistanceText = it },
+                    label = stringResource(
+                        if (useRelativeValues) R.string.distance_over_meters
+                        else R.string.maximum_distance_meters,
+                    ),
+                    enabled = !isGenerating,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider()
+                Text(
+                    stringResource(R.string.score_bounds),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                )
+                AlternativeCriterionField(
+                    value = minScoreText,
+                    onValueChange = { minScoreText = it },
+                    label = stringResource(
+                        if (useRelativeValues) R.string.points_under else R.string.minimum_points,
+                    ),
+                    enabled = !isGenerating,
+                    integerOnly = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                AlternativeCriterionField(
+                    value = maxScoreText,
+                    onValueChange = { maxScoreText = it },
+                    label = stringResource(
+                        if (useRelativeValues) R.string.points_over else R.string.maximum_points,
+                    ),
+                    enabled = !isGenerating,
+                    integerOnly = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                HorizontalDivider()
+                Text(
+                    stringResource(R.string.empty_bounds_help),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (fieldsValid && !boundsValid) {
+                    Text(
+                        stringResource(R.string.invalid_alternative_route_bounds),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onGenerate(
+                        AlternativeRouteCriteria(
+                            count = requireNotNull(count),
+                            sourceRouteId = sourceRoute.id,
+                            minDistanceMeters = minDistance,
+                            maxDistanceMeters = maxDistance,
+                            minScore = minScore,
+                            maxScore = maxScore,
+                            useRelativeValues = useRelativeValues,
+                        ),
+                    )
+                },
+                enabled = fieldsValid && boundsValid && !isGenerating,
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(stringResource(R.string.generate_routes))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isGenerating) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun AlternativeCriterionField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    integerOnly: Boolean = false,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { input ->
+            val allowed = input.filterIndexed { _, char ->
+                char.isDigit() || (!integerOnly && (char == '.' || char == ','))
+            }
+            onValueChange(allowed.take(10))
+        },
+        label = { Text(label, maxLines = 2, color = Color.White) },
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Decimal,
+        ),
+        singleLine = true,
+        enabled = enabled,
+        modifier = modifier,
+    )
 }
 
 @Composable

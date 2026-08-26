@@ -11,6 +11,8 @@ import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.domain.model.RouteSegment
+import com.orientesanasrekinatajs.domain.model.RouteMetadata
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -28,6 +30,8 @@ data class SavedMapDraft(
     val points: List<ControlPoint>,
     val route: OptimizedRoute,
     val selectedRoute: OptimizedRoute = route,
+    val alternativeRoutes: List<OptimizedRoute> = emptyList(),
+    val routeMetadata: Map<String, RouteMetadata> = emptyMap(),
     val routeMode: String = "SHORTEST",
     val routeBudgetMeters: Float? = null,
     val routeTargetScore: Int? = null,
@@ -46,7 +50,10 @@ data class SavedMap(
     val pixelsPerMeter: Float,
     val points: List<ControlPoint>,
     val route: OptimizedRoute,
+    val alternativeRoutes: List<OptimizedRoute>,
+    val routeMetadata: Map<String, RouteMetadata>,
     val selectedRoutePointIds: List<String>,
+    val selectedRouteId: String,
     val routeMode: String,
     val routeBudgetMeters: Float?,
     val routeTargetScore: Int?,
@@ -87,6 +94,26 @@ class SavedMapRepository(
         val selectedRouteIds = draft.selectedRoute.path
             .mapNotNull { persistedIds[it.id] }
             .joinToString(",")
+        val alternativeRouteIds = draft.alternativeRoutes.joinToString(";") { alternative ->
+            alternative.path.mapNotNull { persistedIds[it.id] }.joinToString(",")
+        }
+        val allRoutes = listOf(draft.route) + draft.alternativeRoutes
+        val routeMetadataJson = JSONObject().apply {
+            allRoutes.forEach { savedRoute ->
+                draft.routeMetadata[savedRoute.id]?.let { metadata ->
+                    put(savedRoute.id, JSONObject().apply {
+                        put("name", metadata.name)
+                        put("starred", metadata.isStarred)
+                        metadata.order?.let { put("order", it) }
+                        put("hidden", metadata.isHidden)
+                        put("displayed", metadata.isDisplayed)
+                        put("colorIndex", metadata.colorIndex)
+                        put("alternative", metadata.isAlternative)
+                        metadata.parentRouteId?.let { put("parentRouteId", it) }
+                    })
+                }
+            }
+        }.toString()
         val map = ScannedMapEntity(
             id = mapId,
             timestamp = timestamp,
@@ -102,6 +129,10 @@ class SavedMapRepository(
             lineDistanceMeters = draft.lineDistanceMeters,
             routePointIds = routeIds,
             selectedRoutePointIds = selectedRouteIds,
+            alternativeRoutePointIds = alternativeRouteIds,
+            routeIds = allRoutes.joinToString(";") { it.id },
+            selectedRouteId = draft.selectedRoute.id,
+            routeMetadataJson = routeMetadataJson,
             routeMode = draft.routeMode,
             routeBudgetMeters = draft.routeBudgetMeters,
             routeTargetScore = draft.routeTargetScore,
@@ -147,19 +178,56 @@ class SavedMapRepository(
             .filter(String::isNotBlank)
             .takeIf(List<String>::isNotEmpty)
             ?: routePath.map(ControlPoint::id)
+        val storedRouteIds = stored.map.routeIds.split(';').filter(String::isNotBlank)
+        val primaryRouteId = storedRouteIds.firstOrNull() ?: UUID.randomUUID().toString()
+        val alternativeRoutes = stored.map.alternativeRoutePointIds.split(';')
+            .mapNotNull { encodedPath ->
+                encodedPath.split(',')
+                    .filter(String::isNotBlank)
+                    .mapNotNull(domainById::get)
+                    .takeIf { it.size >= 2 }
+            }
+            .mapIndexed { index, path -> buildRoute(
+                path,
+                stored.map.pixelsPerMeter,
+                0f,
+                0,
+                storedRouteIds.getOrNull(index + 1) ?: UUID.randomUUID().toString(),
+            ) }
+        val routeMetadata = runCatching {
+            val json = JSONObject(stored.map.routeMetadataJson)
+            json.keys().asSequence().associateWith { key ->
+                val value = json.getJSONObject(key)
+                RouteMetadata(
+                    name = value.optString("name"),
+                    isStarred = value.optBoolean("starred"),
+                    order = value.optInt("order", -1).takeIf { it >= 0 },
+                    isHidden = value.optBoolean("hidden"),
+                    isDisplayed = value.optBoolean("displayed"),
+                    colorIndex = value.optInt("colorIndex", 0),
+                    isAlternative = value.optBoolean("alternative"),
+                    parentRouteId = value.optString("parentRouteId").takeIf(String::isNotBlank),
+                )
+            }
+        }.getOrDefault(emptyMap())
+        val primaryRoute = buildRoute(
+            routePath,
+            stored.map.pixelsPerMeter,
+            stored.map.routeTotalDistanceMeters,
+            stored.map.routeTotalScore,
+            primaryRouteId,
+        )
         SavedMap(
             id = stored.map.id,
             name = stored.map.name,
             bitmap = bitmap,
             pixelsPerMeter = stored.map.pixelsPerMeter,
             points = points,
-            route = buildRoute(
-                routePath,
-                stored.map.pixelsPerMeter,
-                stored.map.routeTotalDistanceMeters,
-                stored.map.routeTotalScore,
-            ),
+            route = primaryRoute,
+            alternativeRoutes = alternativeRoutes,
+            routeMetadata = routeMetadata,
             selectedRoutePointIds = selectedRoutePointIds,
+            selectedRouteId = stored.map.selectedRouteId.takeIf(String::isNotBlank) ?: primaryRouteId,
             routeMode = stored.map.routeMode,
             routeBudgetMeters = stored.map.routeBudgetMeters,
             routeTargetScore = stored.map.routeTargetScore,
@@ -198,6 +266,7 @@ class SavedMapRepository(
         pixelsPerMeter: Float,
         storedDistance: Float,
         storedScore: Int,
+        routeId: String = UUID.randomUUID().toString(),
     ): OptimizedRoute {
         var accumulatedDistance = 0f
         var accumulatedScore = 0
@@ -212,6 +281,7 @@ class SavedMapRepository(
             totalDistanceMeters = storedDistance.takeIf { it > 0f } ?: accumulatedDistance,
             totalScore = storedScore.takeIf { it > 0 } ?: accumulatedScore,
             segments = segments,
+            id = routeId,
         )
     }
 

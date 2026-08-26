@@ -13,7 +13,9 @@ import com.orientesanasrekinatajs.ui.processing.MapProcessingEngine
 import com.orientesanasrekinatajs.ui.processing.MapProcessingStage
 import com.orientesanasrekinatajs.ui.processing.MapProcessingViewModel
 import com.orientesanasrekinatajs.ui.routing.RouteMode
+import com.orientesanasrekinatajs.ui.routing.RouteManagementAction
 import com.orientesanasrekinatajs.ui.routing.RoutingViewModel
+import com.orientesanasrekinatajs.domain.model.RouteMetadata
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -107,6 +109,56 @@ class Phase8ViewModelTest {
             )
         }
         assertTrue(viewModel.uiState.value.error.orEmpty().contains("finish"))
+    }
+
+    @Test
+    fun routing_newGenerationAppendsAndSelectsAUniquelyNamedRoute() {
+        val viewModel = RoutingViewModel(Dispatchers.Unconfined)
+
+        onMainThread {
+            viewModel.calculateRoute(routePoints(), 1f, RouteMode.SHORTEST)
+            viewModel.calculateRoute(routePoints(), 1f, RouteMode.SHORTEST)
+        }
+
+        val state = viewModel.uiState.value
+        assertEquals(1, state.alternativeRoutes.size)
+        assertEquals("Route", state.routeMetadata[state.route?.id]?.name)
+        val appended = state.alternativeRoutes.single()
+        assertEquals("Route (2)", state.routeMetadata[appended.id]?.name)
+        assertEquals(appended.id, state.selectedRouteId)
+    }
+
+    @Test
+    fun routing_managementKeepsStarAndDisplayAndMovesSelectionFromHiddenRoute() {
+        val viewModel = RoutingViewModel(Dispatchers.Unconfined)
+        onMainThread {
+            viewModel.calculateRoute(routePoints(), 1f, RouteMode.SHORTEST)
+            viewModel.calculateRoute(routePoints(), 1f, RouteMode.SHORTEST)
+        }
+        val before = viewModel.uiState.value
+        val routes = listOfNotNull(before.route) + before.alternativeRoutes
+        val selected = routes.single { it.id == before.selectedRouteId }
+        val visible = routes.first { it.id != selected.id }
+
+        onMainThread {
+            viewModel.manageRoutes(
+                RouteManagementAction.Apply(
+                    orderedRoutes = routes,
+                    metadata = routes.associate { route ->
+                        route.id to if (route.id == selected.id) {
+                            RouteMetadata(isHidden = true)
+                        } else {
+                            RouteMetadata(isStarred = true, isDisplayed = true)
+                        }
+                    },
+                ),
+            )
+        }
+
+        val after = viewModel.uiState.value
+        assertEquals(visible.id, after.selectedRouteId)
+        assertTrue(after.routeMetadata.getValue(visible.id).isStarred)
+        assertTrue(after.routeMetadata.getValue(visible.id).isDisplayed)
     }
 
     private fun routePoints() = listOf(

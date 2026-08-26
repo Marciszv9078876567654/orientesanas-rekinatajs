@@ -62,27 +62,23 @@ class MainActivity : AppCompatActivity() {
                         mapProcessingViewModel.applyBoundary(boundary)
                     },
                     onApplyEditedBoundary = { boundary, lineStart, lineEnd, lineDistance ->
-                        routingViewModel.reset()
                         mapProcessingViewModel.applyEditedBoundary(
                             boundary, lineStart, lineEnd, lineDistance,
                         )
                     },
                     onUpdateControlPoint = { point ->
-                        routingViewModel.reset()
                         mapProcessingViewModel.updateControlPoint(point)
                     },
                     onAddControlPoint = { point ->
-                        routingViewModel.reset()
                         mapProcessingViewModel.addControlPoint(point)
                     },
                     onRemoveControlPoint = { id ->
-                        routingViewModel.reset()
                         mapProcessingViewModel.removeControlPoint(id)
                     },
                     onClearControlPoints = {
-                        routingViewModel.reset()
                         mapProcessingViewModel.clearControlPoints()
                     },
+                    onInvalidateRoute = routingViewModel::invalidateRoute,
                     onCalculateRoute = { pixelsPerMeter, mode, budgetMeters, targetScore ->
                         routingViewModel.calculateRoute(
                             detectedPoints = processingState.controlPoints,
@@ -92,6 +88,10 @@ class MainActivity : AppCompatActivity() {
                             targetScore = targetScore,
                         )
                     },
+                    onGenerateAlternativeRoutes = { points, pixelsPerMeter, criteria ->
+                        routingViewModel.generateAlternativeRoutes(points, pixelsPerMeter, criteria)
+                    },
+                    onManageRoutes = routingViewModel::manageRoutes,
                     onSaveMap = { draft, onSaved ->
                         savedMapsViewModel.save(draft) { saved ->
                             mapProcessingViewModel.markSaved(saved, draft)
@@ -104,9 +104,12 @@ class MainActivity : AppCompatActivity() {
                             mapProcessingViewModel.openSavedMap(saved)
                             routingViewModel.openSavedRoute(
                                 route = saved.route,
+                                alternativeRoutes = saved.alternativeRoutes,
+                                routeMetadata = saved.routeMetadata,
                                 points = saved.points,
                                 pixelsPerMeter = saved.pixelsPerMeter,
                                 selectedRoutePointIds = saved.selectedRoutePointIds,
+                                selectedRouteId = saved.selectedRouteId,
                                 mode = runCatching { RouteMode.valueOf(saved.routeMode) }
                                     .getOrDefault(RouteMode.SHORTEST),
                                 budgetMeters = saved.routeBudgetMeters,

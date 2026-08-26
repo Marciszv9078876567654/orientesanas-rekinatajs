@@ -14,4 +14,5 @@ data class OptimizedRoute(
     val totalDistanceMeters: Float,
     val totalScore: Int,
     val segments: List<RouteSegment>,
+    val id: String = java.util.UUID.randomUUID().toString(),
 )

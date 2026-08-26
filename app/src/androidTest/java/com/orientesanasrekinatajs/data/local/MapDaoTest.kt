@@ -8,8 +8,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.orientesanasrekinatajs.data.local.entity.ControlPointEntity
 import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
 import com.orientesanasrekinatajs.domain.model.ControlPoint
+import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.Point2D
+import com.orientesanasrekinatajs.domain.model.RouteMetadata
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -81,13 +83,34 @@ class MapDaoTest {
         val repository = SavedMapRepository(mapsDirectory, database.mapDao())
         val bitmap = Bitmap.createBitmap(24, 16, Bitmap.Config.ARGB_8888)
         val point = ControlPoint(code = 65, center = Point2D(8f, 9f))
+        val start = ControlPoint(
+            code = 0,
+            center = Point2D(1f, 1f),
+            type = ControlPointType.START,
+        )
+        val finish = ControlPoint(
+            code = 0,
+            center = Point2D(20f, 12f),
+            type = ControlPointType.FINISH,
+        )
+        val primaryRoute = OptimizedRoute(listOf(start, point, finish), 0f, point.points, emptyList())
+        val alternativeRoute = OptimizedRoute(listOf(start, finish), 0f, 0, emptyList())
 
         repository.save(
             SavedMapDraft(
                 bitmap = bitmap,
                 pixelsPerMeter = 2.5f,
-                points = listOf(point),
-                route = OptimizedRoute(listOf(point), 0f, 0, emptyList()),
+                points = listOf(start, point, finish),
+                route = primaryRoute,
+                alternativeRoutes = listOf(alternativeRoute),
+                routeMetadata = mapOf(
+                    alternativeRoute.id to RouteMetadata(
+                        name = "Direct",
+                        isStarred = true,
+                        isDisplayed = true,
+                        order = 0,
+                    ),
+                ),
                 lineStart = Point2D(1f, 2f),
                 lineEnd = Point2D(11f, 2f),
                 lineDistanceMeters = 4f,
@@ -103,14 +126,20 @@ class MapDaoTest {
         assertEquals(24, reopened.bitmap.width)
         assertEquals(16, reopened.bitmap.height)
         assertEquals(2.5f, reopened.pixelsPerMeter)
-        assertEquals(point.code, reopened.points.single().code)
-        assertEquals(point.center, reopened.points.single().center)
+        assertEquals(point.code, reopened.points.single { it.type == ControlPointType.CONTROL }.code)
+        assertEquals(point.center, reopened.points.single { it.type == ControlPointType.CONTROL }.center)
         assertEquals("Training route", reopened.name)
         assertEquals(Point2D(1f, 2f), reopened.lineStart)
         assertEquals(Point2D(11f, 2f), reopened.lineEnd)
         assertEquals(4f, reopened.lineDistanceMeters)
         assertEquals(1, reopened.rotationQuarterTurns)
-        assertEquals(1, reopened.route.path.size)
+        assertEquals(3, reopened.route.path.size)
+        assertEquals(1, reopened.alternativeRoutes.size)
+        assertEquals(2, reopened.alternativeRoutes.single().path.size)
+        assertEquals("Direct", reopened.routeMetadata.values.single().name)
+        assertTrue(reopened.routeMetadata.values.single().isStarred)
+        assertTrue(reopened.routeMetadata.values.single().isDisplayed)
+        assertEquals(0, reopened.routeMetadata.values.single().order)
         assertEquals(reopened.route.path.map(ControlPoint::id), reopened.selectedRoutePointIds)
         assertEquals("TARGET_SCORE", reopened.routeMode)
         assertEquals(12, reopened.routeTargetScore)
@@ -144,6 +173,8 @@ class MapDaoTest {
                 OrienteeringDatabase.MIGRATION_1_2,
                 OrienteeringDatabase.MIGRATION_2_3,
                 OrienteeringDatabase.MIGRATION_3_4,
+                OrienteeringDatabase.MIGRATION_4_5,
+                OrienteeringDatabase.MIGRATION_5_6,
             )
             .allowMainThreadQueries()
             .build()
@@ -152,6 +183,8 @@ class MapDaoTest {
             assertEquals("", migrated.mapDao().getMap("old")?.routePointIds)
             assertEquals("", migrated.mapDao().getMap("old")?.selectedRoutePointIds)
             assertEquals("SHORTEST", migrated.mapDao().getMap("old")?.routeMode)
+            assertEquals("", migrated.mapDao().getMap("old")?.alternativeRoutePointIds)
+            assertEquals("{}", migrated.mapDao().getMap("old")?.routeMetadataJson)
         } finally {
             migrated.close()
             context.deleteDatabase(databaseName)

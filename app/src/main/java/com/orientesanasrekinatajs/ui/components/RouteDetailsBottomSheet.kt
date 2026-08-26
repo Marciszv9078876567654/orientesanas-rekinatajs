@@ -8,12 +8,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -35,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.ControlPointType
+import com.orientesanasrekinatajs.domain.model.RouteMetadata
 
 /** Modal route breakdown with one row for every point in visit order. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,16 +46,19 @@ fun RouteDetailsBottomSheet(
     route: OptimizedRoute,
     alternativeRoutes: List<OptimizedRoute> = emptyList(),
     nextLongestRouteCount: Int = 0,
-    selectedRouteIndex: Int = 0,
-    onRouteSelected: (Int) -> Unit = {},
+    routeMetadata: Map<String, RouteMetadata> = emptyMap(),
+    selectedRouteId: String? = null,
+    onRouteSelected: (String) -> Unit = {},
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val higherScoreRoutes = alternativeRoutes.take(nextLongestRouteCount)
     val lowerScoreRoutes = alternativeRoutes.drop(nextLongestRouteCount)
-    val routes = higherScoreRoutes + route + lowerScoreRoutes
-    val primaryRouteIndex = higherScoreRoutes.size
-    val safeSelectedIndex = selectedRouteIndex.coerceIn(routes.indices)
+    val allRoutes = higherScoreRoutes + route + lowerScoreRoutes
+    val routes = allRoutes.filterNot { routeMetadata[it.id]?.isHidden == true }
+    val primaryRouteIndex = routes.indexOfFirst { it.id == route.id }
+    val safeSelectedIndex = routes.indexOfFirst { it.id == selectedRouteId }
+        .takeIf { it >= 0 } ?: primaryRouteIndex.takeIf { it >= 0 } ?: 0
     val selectedRoute = routes[safeSelectedIndex]
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -63,12 +69,24 @@ fun RouteDetailsBottomSheet(
             edgePadding = 12.dp,
         ) {
             routes.forEachIndexed { index, candidate ->
-                val scoreDifference = candidate.totalScore - route.totalScore
-                val distanceDifference = candidate.totalDistanceMeters - route.totalDistanceMeters
+                val primaryScoreDifference = candidate.totalScore - route.totalScore
+                val selectedScoreDifference = candidate.totalScore - selectedRoute.totalScore
+                val selectedDistanceDifference =
+                    candidate.totalDistanceMeters - selectedRoute.totalDistanceMeters
                 val isSelected = safeSelectedIndex == index
+                val customName = routeMetadata[candidate.id]
+                    ?.name
+                    ?.takeIf(String::isNotBlank)
                 Tab(
                     selected = isSelected,
-                    onClick = { onRouteSelected(index) },
+                    onClick = { onRouteSelected(candidate.id) },
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            routeDetailColor(routeMetadata[candidate.id]?.colorIndex ?: 0)
+                                .copy(alpha = if (isSelected) 0.34f else 0.16f),
+                        ),
                     text = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Row(
@@ -76,64 +94,85 @@ fun RouteDetailsBottomSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    when {
+                                    customName ?: when {
                                         index == primaryRouteIndex -> stringResource(
                                             R.string.primary_route_tab,
                                         )
-                                        scoreDifference > 0 -> pluralStringResource(
+                                        primaryScoreDifference > 0 -> pluralStringResource(
                                             R.plurals.more_score_points_route_tab,
-                                            scoreDifference,
-                                            scoreDifference,
+                                            primaryScoreDifference,
+                                            primaryScoreDifference,
                                         )
-                                        else -> pluralStringResource(
+                                        primaryScoreDifference < 0 -> pluralStringResource(
                                             R.plurals.fewer_score_points_route_tab,
-                                            -scoreDifference,
-                                            -scoreDifference,
+                                            -primaryScoreDifference,
+                                            -primaryScoreDifference,
                                         )
+                                        else -> stringResource(R.string.zero_score_points_route_tab)
                                     },
                                 )
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = stringResource(R.string.selected_route),
-                                        modifier = Modifier.size(14.dp),
+                            }
+                            val (distanceStatistics, scoreStatistics) = if (isSelected) {
+                                stringResource(
+                                    R.string.distance_meters_format,
+                                    candidate.totalDistanceMeters,
+                                ) to pluralStringResource(
+                                    R.plurals.route_score_points,
+                                    candidate.totalScore,
+                                    candidate.totalScore,
+                                )
+                            } else {
+                                val distance = stringResource(
+                                    if (selectedDistanceDifference >= 0f) {
+                                        R.string.route_distance_difference_longer
+                                    } else {
+                                        R.string.route_distance_difference_shorter
+                                    },
+                                    kotlin.math.abs(selectedDistanceDifference),
+                                )
+                                val score = when {
+                                    selectedScoreDifference > 0 -> pluralStringResource(
+                                        R.plurals.more_score_points_route_tab,
+                                        selectedScoreDifference,
+                                        selectedScoreDifference,
+                                    )
+                                    selectedScoreDifference < 0 -> pluralStringResource(
+                                        R.plurals.fewer_score_points_route_tab,
+                                        -selectedScoreDifference,
+                                        -selectedScoreDifference,
+                                    )
+                                    else -> pluralStringResource(
+                                        R.plurals.more_score_points_route_tab,
+                                        0,
+                                        0,
                                     )
                                 }
+                                distance to score
                             }
-                            if (index != primaryRouteIndex) {
-                                Text(
-                                    text = stringResource(
-                                        if (distanceDifference >= 0f) {
-                                            R.string.route_distance_difference_longer
-                                        } else {
-                                            R.string.route_distance_difference_shorter
-                                        },
-                                        kotlin.math.abs(distanceDifference),
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                            }
+                            Text(
+                                text = distanceStatistics,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            Text(
+                                text = scoreStatistics,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
                         }
                     },
                 )
             }
         }
-        Text(
-            text = stringResource(
-                R.string.route_summary,
-                selectedRoute.totalDistanceMeters,
-                selectedRoute.totalScore,
-            ),
-            style = MaterialTheme.typography.titleSmall,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
-        )
         RouteStepTable(
             route = selectedRoute,
             modifier = Modifier.fillMaxWidth(),
         )
     }
 }
+
+private fun routeDetailColor(index: Int): androidx.compose.ui.graphics.Color = listOf(
+    0xFF455A64, 0xFF3F51B5, 0xFF009688, 0xFFFF9800, 0xFF9C27B0,
+    0xFF03A9F4, 0xFF8BC34A, 0xFFFF5722, 0xFF795548, 0xFF607D8B,
+).let { androidx.compose.ui.graphics.Color(it[index.mod(it.size)]) }
 
 /** Lightweight route-order editor shell. Drag-and-drop behavior will be added separately. */
 @OptIn(ExperimentalMaterial3Api::class)

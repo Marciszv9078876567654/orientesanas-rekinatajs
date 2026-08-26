@@ -169,6 +169,13 @@ fun InteractiveCornerCanvas(
 }
 
 /** Draws an optimized route over the rectified map, animating its path when enabled. */
+data class RouteRenderLayer(
+    val id: String,
+    val points: List<ControlPoint>,
+    val color: Color,
+    val isActive: Boolean,
+)
+
 @Composable
 fun RouteRenderingCanvas(
     bitmap: Bitmap,
@@ -176,13 +183,17 @@ fun RouteRenderingCanvas(
     allPoints: List<ControlPoint> = route,
     rotationQuarterTurns: Int = 0,
     recenterKey: Int = 0,
+    routeLayers: List<RouteRenderLayer>? = null,
     modifier: Modifier = Modifier,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val animationsEnabled = LocalAnimationsEnabled.current
-    val routeKey = route.joinToString(separator = ":") { it.id }
+    val effectiveLayers = routeLayers ?: run {
+        listOf(RouteRenderLayer("active", route, Color(0xFF455A64), true))
+    }
+    val activeRoute = effectiveLayers.firstOrNull(RouteRenderLayer::isActive)?.points ?: route
+    val routeKey = activeRoute.joinToString(separator = ":") { it.id }
     val progress = remember { Animatable(if (animationsEnabled) 0f else 1f) }
-    val routeColor = Color(0xFFE91E63)
     val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
@@ -201,13 +212,13 @@ fun RouteRenderingCanvas(
     }
 
     LaunchedEffect(routeKey, animationsEnabled) {
-        if (!animationsEnabled || route.size < 2) {
+        if (!animationsEnabled || activeRoute.size < 2) {
             progress.snapTo(1f)
         } else {
             progress.snapTo(0f)
             progress.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(durationMillis = ((route.size - 1) * 280).coerceAtMost(2_500)),
+                animationSpec = tween(durationMillis = ((activeRoute.size - 1) * 280).coerceAtMost(2_500)),
             )
         }
     }
@@ -246,10 +257,17 @@ fun RouteRenderingCanvas(
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
-            val centers = route.map { viewport.base.toCanvas(it.center) }
-            drawRouteLines(centers, progress.value, routeColor)
+            effectiveLayers.filterNot(RouteRenderLayer::isActive).forEach { layer ->
+                val centers = layer.points.map { viewport.base.toCanvas(it.center) }
+                drawRouteLines(centers, 1f, layer.color.copy(alpha = 0.62f))
+            }
+            effectiveLayers.filter(RouteRenderLayer::isActive).forEach { layer ->
+                val centers = layer.points.map { viewport.base.toCanvas(it.center) }
+                drawRouteLines(centers, progress.value, layer.color)
+            }
         }
-        val visitedIds = route.mapTo(mutableSetOf()) { it.id }
+        val visitedIds = effectiveLayers.flatMap(RouteRenderLayer::points).mapTo(mutableSetOf()) { it.id }
+        val activeLayer = effectiveLayers.firstOrNull(RouteRenderLayer::isActive)
         drawReferencePoints(
             points = allPoints,
             viewport = viewport,
@@ -258,6 +276,8 @@ fun RouteRenderingCanvas(
             mutedPointIds = allPoints.mapNotNullTo(mutableSetOf()) { point ->
                 point.id.takeUnless(visitedIds::contains)
             },
+            highlightedPointIds = activeLayer?.points?.mapTo(mutableSetOf()) { it.id }.orEmpty(),
+            highlightColor = activeLayer?.color,
         )
     }
 }
@@ -592,6 +612,8 @@ private fun DrawScope.drawReferencePoints(
     zoom: Float,
     useTypeColors: Boolean,
     mutedPointIds: Set<String> = emptySet(),
+    highlightedPointIds: Set<String> = emptySet(),
+    highlightColor: Color? = null,
 ) {
     val pointScale = sqrt(zoom).coerceAtMost(2.4f)
     val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -609,7 +631,12 @@ private fun DrawScope.drawReferencePoints(
         labelPaint.alpha = if (isMuted) 125 else 255
         outlinePaint.alpha = if (isMuted) 150 else 255
         val center = viewport.toCanvas(point.center)
-        val markerColor = if (isMuted) {
+        val markerColor = if (
+            !isMuted && point.type == ControlPointType.CONTROL &&
+            point.id in highlightedPointIds && highlightColor != null
+        ) {
+            highlightColor
+        } else if (isMuted) {
             Color(0xFF7A7A7A)
         } else if (useTypeColors) {
             when (point.type) {
