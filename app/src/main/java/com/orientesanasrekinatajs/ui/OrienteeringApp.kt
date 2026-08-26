@@ -440,8 +440,13 @@ private fun MapFlowScreen(
         mutableStateOf(processingState.savedMapId == null || processingState.savedContentDirty)
     }
     var editSessionKey by rememberSaveable(sessionKey) { mutableIntStateOf(0) }
-    val linePixels = if (lineStart != null && lineEnd != null) {
-        hypot(lineEnd!!.x - lineStart!!.x, lineEnd!!.y - lineStart!!.y)
+    val currentLineStart = lineStart
+    val currentLineEnd = lineEnd
+    val linePixels = if (currentLineStart != null && currentLineEnd != null) {
+        hypot(
+            currentLineEnd.x - currentLineStart.x,
+            currentLineEnd.y - currentLineStart.y,
+        )
     } else {
         0f
     }
@@ -607,8 +612,13 @@ private fun EditMapScreen(
     var viewportCenterPoint by remember(rectified) {
         mutableStateOf(Point2D(rectified.width / 2f, rectified.height / 2f))
     }
-    val linePixels = if (lineStart != null && lineEnd != null) {
-        hypot(lineEnd!!.x - lineStart!!.x, lineEnd!!.y - lineStart!!.y)
+    val currentLineStart = lineStart
+    val currentLineEnd = lineEnd
+    val linePixels = if (currentLineStart != null && currentLineEnd != null) {
+        hypot(
+            currentLineEnd.x - currentLineStart.x,
+            currentLineEnd.y - currentLineStart.y,
+        )
     } else {
         0f
     }
