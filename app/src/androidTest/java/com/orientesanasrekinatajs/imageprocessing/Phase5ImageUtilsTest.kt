@@ -1,0 +1,85 @@
+package com.orientesanasrekinatajs.imageprocessing
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.orientesanasrekinatajs.domain.model.Point2D
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class Phase5ImageUtilsTest {
+
+    @Test
+    fun cropRegionOfInterestUsesFiveRadiusDiameter() {
+        val bitmap = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
+
+        val cropped = ImageCropUtils.cropRegionOfInterest(
+            bitmap = bitmap,
+            center = Point2D(200f, 150f),
+            radius = 20f,
+        )
+
+        assertEquals(100, cropped.width)
+        assertEquals(100, cropped.height)
+    }
+
+    @Test
+    fun cropRegionOfInterestClipsAtBitmapEdges() {
+        val bitmap = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
+
+        val cropped = ImageCropUtils.cropRegionOfInterest(
+            bitmap = bitmap,
+            center = Point2D(10f, 10f),
+            radius = 20f,
+        )
+
+        assertEquals(60, cropped.width)
+        assertEquals(60, cropped.height)
+    }
+
+    @Test
+    fun cropRegionOfInterestRejectsInvalidRadius() {
+        val bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ImageCropUtils.cropRegionOfInterest(bitmap, Point2D(50f, 50f), 0f)
+        }
+    }
+
+    @Test
+    fun extractControlNumberRecognizesSyntheticText() = runBlocking {
+        val bitmap = textBitmap("65")
+
+        assertEquals(65, OcrUtils.extractControlNumber(bitmap))
+    }
+
+    @Test
+    fun extractControlNumberRejectsSingleDigitText() = runBlocking {
+        val bitmap = textBitmap("7")
+
+        assertNull(OcrUtils.extractControlNumber(bitmap))
+    }
+
+    private fun textBitmap(value: String): Bitmap {
+        val bitmap = Bitmap.createBitmap(480, 240, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.BLACK
+            textAlign = Paint.Align.CENTER
+            textSize = 160f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val baseline = bitmap.height / 2f - (paint.ascent() + paint.descent()) / 2f
+        canvas.drawText(value, bitmap.width / 2f, baseline, paint)
+        return bitmap
+    }
+}

@@ -18,13 +18,14 @@ The app digitizes a photographed orienteering map, identifies its course marking
 - Show results on a dedicated zoomable route page with rotation, route summary, and step details.
 - Persist theme, language, animation, distance-unit, and default-budget preferences.
 - Switch between system, English, and Latvian language settings.
-- Save the rectified map image, calibrated scale, and edited points, then reopen it from Recent maps.
+- Save, rename, reopen, update, and delete a route snapshot containing the rectified image, route order, scale, calibration line, rotation, and edited points.
+- Clear all saved maps from Settings after confirmation.
 
 ## Main screens
 
 ### Home
 
-Contains photo selection, system-camera capture, settings, and Recent maps actions. Recent maps lists saved entries by timestamp and reopens a selected map. Primary action buttons use consistent intrinsic widths. The explanatory subtitle is centered and no wider than the title.
+Contains photo selection, system-camera capture, settings, and Recent maps actions. Recent maps lists named saved entries with timestamps and reopens a selection directly on Route. Primary action buttons use consistent intrinsic widths. The explanatory subtitle is centered and no wider than the title.
 
 ### Settings
 
@@ -36,11 +37,11 @@ Shown when automatic boundary detection fails. A dismissible dialog explains the
 
 ### Edit map
 
-Contains the zoomable distance-calibration map, distance entry, route-mode controls, corner editing, and full point editing. Calibration starts empty: the first tap creates one endpoint, the second completes the line, and completed endpoints can then be dragged. Detected controls appear as zoom-scaled reference markers with upright adjacent labels in calibration and point editing. Compact overlay actions provide rotation, recentering, line reset, and point creation as appropriate. New points are placed at the center crosshair, start with an empty control-code field, and remain provisional until saved. A failed calculation appears in a dismissible dialog and does not reflow the screen.
+Contains the zoomable distance-calibration map, distance entry, route-mode controls, corner editing, and full point editing. Calibration starts empty: the first tap creates one draggable endpoint and the second completes the line. Detected controls appear as zoom-scaled reference markers with upright, white-outlined labels. Compact overlay actions provide rotation, recentering, confirmed line reset, confirmed clear-all-points, and point creation. Corner edits preserve controls and calibration by perspective-projecting coordinates into the new crop; Back leaves the corner/point sub-editor without applying it. New points are placed at the enlarged center crosshair, start with an empty control-code field, and remain provisional until saved. For saved routes, Back and a bottom Discard action restore the saved snapshot.
 
 ### Route
 
-Contains only route-result actions. The map supports focal-point pinch zoom and pan and has overlaid rotation/recenter controls, plus the route summary, step details, and Save map action. The details table separates each visit's score from its cumulative score and safely supports one combined start/finish point appearing at both ends. Back returns to Edit map without discarding the selected image, calibration line, distance, or rotation.
+Contains only route-result actions. The map supports focal-point pinch zoom and pan and has overlaid rotation, recenter, and Edit controls. The header has Home plus state-dependent Save or Delete; saved routes also have a rename icon next to the title. A clean loaded route is not offered Save again until changed. The summary and details action are vertically aligned. The details table labels S/F endpoints, separates each visit's score from cumulative score, and safely supports one combined start/finish point appearing at both ends. Page changes and quarter-turn rotation use subtle animations when animations are enabled.
 
 ## Routing rules
 
@@ -53,5 +54,6 @@ Contains only route-result actions. The map supports focal-point pinch zoom and 
 
 - Android 11 and newer
 - Portrait-first responsive Compose UI
+- Portrait orientation is locked; the keyboard does not resize/pan the map window.
 - Light, dark, and system themes
 - English, Latvian, and system languages

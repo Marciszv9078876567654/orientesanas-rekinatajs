@@ -1,6 +1,7 @@
 package com.orientesanasrekinatajs
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -13,6 +14,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.orientesanasrekinatajs.data.preferences.PreferencesRepository
 import com.orientesanasrekinatajs.ui.OrienteeringApp
 import com.orientesanasrekinatajs.ui.processing.MapProcessingViewModel
+import com.orientesanasrekinatajs.ui.routing.RouteMode
 import com.orientesanasrekinatajs.ui.routing.RoutingViewModel
 import com.orientesanasrekinatajs.ui.savedmaps.SavedMapsViewModel
 import com.orientesanasrekinatajs.ui.settings.SettingsViewModel
@@ -34,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
         setContent {
             val userPreferences by settingsViewModel.userPreferences.collectAsStateWithLifecycle()
             val processingState by mapProcessingViewModel.uiState.collectAsStateWithLifecycle()
@@ -58,9 +61,11 @@ class MainActivity : AppCompatActivity() {
                         routingViewModel.reset()
                         mapProcessingViewModel.applyBoundary(boundary)
                     },
-                    onApplyEditedBoundary = { boundary ->
+                    onApplyEditedBoundary = { boundary, lineStart, lineEnd, lineDistance ->
                         routingViewModel.reset()
-                        mapProcessingViewModel.applyEditedBoundary(boundary)
+                        mapProcessingViewModel.applyEditedBoundary(
+                            boundary, lineStart, lineEnd, lineDistance,
+                        )
                     },
                     onUpdateControlPoint = { point ->
                         routingViewModel.reset()
@@ -78,12 +83,13 @@ class MainActivity : AppCompatActivity() {
                         routingViewModel.reset()
                         mapProcessingViewModel.clearControlPoints()
                     },
-                    onCalculateRoute = { pixelsPerMeter, mode, budgetMeters ->
+                    onCalculateRoute = { pixelsPerMeter, mode, budgetMeters, targetScore ->
                         routingViewModel.calculateRoute(
                             detectedPoints = processingState.controlPoints,
                             pixelsPerMeter = pixelsPerMeter,
                             mode = mode,
                             budgetMeters = budgetMeters,
+                            targetScore = targetScore,
                         )
                     },
                     onSaveMap = { draft, onSaved ->
@@ -96,7 +102,16 @@ class MainActivity : AppCompatActivity() {
                         savedMapsViewModel.load(id) { saved ->
                             routingViewModel.reset()
                             mapProcessingViewModel.openSavedMap(saved)
-                            routingViewModel.openSavedRoute(saved.route)
+                            routingViewModel.openSavedRoute(
+                                route = saved.route,
+                                points = saved.points,
+                                pixelsPerMeter = saved.pixelsPerMeter,
+                                selectedRoutePointIds = saved.selectedRoutePointIds,
+                                mode = runCatching { RouteMode.valueOf(saved.routeMode) }
+                                    .getOrDefault(RouteMode.SHORTEST),
+                                budgetMeters = saved.routeBudgetMeters,
+                                targetScore = saved.routeTargetScore,
+                            )
                         }
                     },
                     onRenameSavedMap = { id, name, onRenamed ->

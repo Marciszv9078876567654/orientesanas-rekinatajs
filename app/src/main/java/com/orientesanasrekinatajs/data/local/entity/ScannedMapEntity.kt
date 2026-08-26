@@ -1,6 +1,7 @@
 package com.orientesanasrekinatajs.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 import java.util.UUID
 
@@ -23,14 +24,18 @@ data class ScannedMapEntity(
     val timestamp: Long = System.currentTimeMillis(),
     val imageFilePath: String,
     val pixelsPerMeter: Float,
-    val name: String = "Route",
+    @ColumnInfo(defaultValue = "'Route'") val name: String = "Route",
     val calibrationStartX: Float? = null,
     val calibrationStartY: Float? = null,
     val calibrationEndX: Float? = null,
     val calibrationEndY: Float? = null,
     val lineDistanceMeters: Float? = null,
-    val routePointIds: String = "",
-    val routeTotalDistanceMeters: Float = 0f,
-    val routeTotalScore: Int = 0,
-    val rotationQuarterTurns: Int = 0,
+    @ColumnInfo(defaultValue = "''") val routePointIds: String = "",
+    @ColumnInfo(defaultValue = "''") val selectedRoutePointIds: String = "",
+    @ColumnInfo(defaultValue = "'SHORTEST'") val routeMode: String = "SHORTEST",
+    val routeBudgetMeters: Float? = null,
+    val routeTargetScore: Int? = null,
+    @ColumnInfo(defaultValue = "0") val routeTotalDistanceMeters: Float = 0f,
+    @ColumnInfo(defaultValue = "0") val routeTotalScore: Int = 0,
+    @ColumnInfo(defaultValue = "0") val rotationQuarterTurns: Int = 0,
 )
