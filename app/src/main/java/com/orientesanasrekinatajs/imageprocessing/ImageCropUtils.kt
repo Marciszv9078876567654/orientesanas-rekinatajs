@@ -8,6 +8,7 @@ import kotlin.math.floor
 /** Bitmap cropping operations used to prepare small OCR inputs. */
 object ImageCropUtils {
     private const val ROI_RADIUS_MULTIPLIER = 2.5f
+    private const val MIN_OCR_DIMENSION = 32
 
     /**
      * Crops a square extending 2.5 symbol radii from [center] in every direction.
@@ -26,11 +27,36 @@ object ImageCropUtils {
         require(center.y >= 0f && center.y < bitmap.height) { "Center y must be inside the bitmap" }
 
         val halfSize = radius * ROI_RADIUS_MULTIPLIER
-        val left = floor(center.x - halfSize).toInt().coerceAtLeast(0)
-        val top = floor(center.y - halfSize).toInt().coerceAtLeast(0)
-        val right = ceil(center.x + halfSize).toInt().coerceAtMost(bitmap.width)
-        val bottom = ceil(center.y + halfSize).toInt().coerceAtMost(bitmap.height)
+        val requestedLeft = floor(center.x - halfSize).toInt().coerceAtLeast(0)
+        val requestedTop = floor(center.y - halfSize).toInt().coerceAtLeast(0)
+        val requestedRight = ceil(center.x + halfSize).toInt().coerceAtMost(bitmap.width)
+        val requestedBottom = ceil(center.y + halfSize).toInt().coerceAtMost(bitmap.height)
+        val (left, right) = expandToMinimumSize(
+            requestedLeft,
+            requestedRight,
+            bitmap.width,
+        )
+        val (top, bottom) = expandToMinimumSize(
+            requestedTop,
+            requestedBottom,
+            bitmap.height,
+        )
 
         return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+    }
+
+    private fun expandToMinimumSize(start: Int, end: Int, limit: Int): Pair<Int, Int> {
+        val currentSize = end - start
+        val targetSize = maxOf(currentSize, minOf(MIN_OCR_DIMENSION, limit))
+        if (targetSize == currentSize) return start to end
+
+        val extraBefore = (targetSize - currentSize) / 2
+        var expandedStart = (start - extraBefore).coerceAtLeast(0)
+        var expandedEnd = expandedStart + targetSize
+        if (expandedEnd > limit) {
+            expandedEnd = limit
+            expandedStart = limit - targetSize
+        }
+        return expandedStart to expandedEnd
     }
 }

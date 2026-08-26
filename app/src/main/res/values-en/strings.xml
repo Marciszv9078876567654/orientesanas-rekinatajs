@@ -73,6 +73,17 @@
     <string name="no_recent_maps">There are no saved maps yet.</string>
     <string name="boundary_not_detected_title">Map boundary not found</string>
     <string name="edit_map">Edit map</string>
+    <string name="edit_route">Edit route</string>
+    <string name="route_actions">Route actions</string>
+    <string name="route_restrictions">Route restrictions</string>
+    <string name="export_route">Export route</string>
+    <string name="import_route">Import route</string>
+    <string name="route_restrictions_placeholder">These actions will be available soon.</string>
+    <string name="blacklist_control">Blacklist a control</string>
+    <string name="blacklist_connection">Blacklist a connection between controls</string>
+    <string name="mandatory_control">Mandatory control</string>
+    <string name="mandatory_connection">Mandatory road between controls</string>
+    <string name="reorder_route_points_placeholder">Point reordering will be available soon.</string>
     <string name="route">Route</string>
     <string name="calibration_help">Use the line to set the map scale. Place its endpoints across a known distance on the map, then enter that real-world distance below. Drag either endpoint to refine the line, and use two fingers to zoom.</string>
     <string name="line_distance">Line distance (m)</string>
@@ -89,6 +100,7 @@
     <string name="recenter_view">Recenter view</string>
     <string name="add_point">Add point</string>
     <string name="done_editing_points">Done editing points</string>
+    <string name="save_points">Save points</string>
     <string name="point_edit_help">Drag a point to change its location. Tap a point to edit its type or code. Use the add button to create a new point.</string>
     <string name="edit_point">Edit point</string>
     <string name="control_code">Control code</string>
@@ -101,6 +113,10 @@
     <string name="point_type_control">Control</string>
     <string name="leave_map_edit_title">Discard map changes?</string>
     <string name="leave_map_edit_confirmation">Going back will discard the changes made on this screen.</string>
+    <string name="discard_point_changes_title">Discard point changes?</string>
+    <string name="discard_point_changes_confirmation">All changes made during this point-editing session will be lost.</string>
+    <string name="leave_unsaved_route_title">Discard unsaved route?</string>
+    <string name="leave_unsaved_route_confirmation">Going Home will discard the unsaved route changes.</string>
     <string name="primary_route_tab">Route</string>
     <plurals name="more_score_points_route_tab">
         <item quantity="one">+%1$d point</item>

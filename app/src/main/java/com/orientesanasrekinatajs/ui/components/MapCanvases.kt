@@ -3,6 +3,7 @@ package com.orientesanasrekinatajs.ui.components
 import android.graphics.Bitmap
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -61,12 +62,21 @@ fun InteractiveCornerCanvas(
     val lineColor = Color(0xFFFFC107)
     val handleColor = Color(0xFFE91E63)
     val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
+    val animationsEnabled = LocalAnimationsEnabled.current
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-    LaunchedEffect(rotationQuarterTurns, recenterKey) {
+    LaunchedEffect(rotationQuarterTurns) {
         zoom = 1f
         pan = Offset.Zero
+    }
+    LaunchedEffect(recenterKey) {
+        if (recenterKey > 0) {
+            animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
+                zoom = newZoom
+                pan = newPan
+            }
+        }
     }
 
     Canvas(
@@ -177,9 +187,17 @@ fun RouteRenderingCanvas(
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
 
-    LaunchedEffect(rotationQuarterTurns, recenterKey) {
+    LaunchedEffect(rotationQuarterTurns) {
         zoom = 1f
         pan = Offset.Zero
+    }
+    LaunchedEffect(recenterKey) {
+        if (recenterKey > 0) {
+            animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
+                zoom = newZoom
+                pan = newPan
+            }
+        }
     }
 
     LaunchedEffect(routeKey, animationsEnabled) {
@@ -264,9 +282,18 @@ fun DistanceCalibrationCanvas(
     val latestEnd by rememberUpdatedState(end)
     val latestOnLineChange by rememberUpdatedState(onLineChange)
     val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
-    LaunchedEffect(rotationQuarterTurns, recenterKey) {
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(rotationQuarterTurns) {
         zoom = 1f
         pan = Offset.Zero
+    }
+    LaunchedEffect(recenterKey) {
+        if (recenterKey > 0) {
+            animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
+                zoom = newZoom
+                pan = newPan
+            }
+        }
     }
 
     Canvas(
@@ -404,9 +431,18 @@ fun InteractiveControlPointCanvas(
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val latestOnViewportCenterChange by rememberUpdatedState(onViewportCenterChange)
     val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
-    LaunchedEffect(rotationQuarterTurns, recenterKey) {
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(rotationQuarterTurns) {
         zoom = 1f
         pan = Offset.Zero
+    }
+    LaunchedEffect(recenterKey) {
+        if (recenterKey > 0) {
+            animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
+                zoom = newZoom
+                pan = newPan
+            }
+        }
     }
     LaunchedEffect(viewportSize, rotationQuarterTurns, zoom, pan) {
         if (viewportSize.width > 0 && viewportSize.height > 0) {
@@ -677,6 +713,28 @@ private fun animatedRotationDegrees(rotationQuarterTurns: Int): Float {
         animationSpec = tween(if (animationsEnabled) 180 else 0),
         label = "mapRotation",
     ).value
+}
+
+private suspend fun animateViewportToCenter(
+    currentZoom: Float,
+    currentPan: Offset,
+    animationsEnabled: Boolean,
+    onUpdate: (Float, Offset) -> Unit,
+) {
+    if (!animationsEnabled) {
+        onUpdate(1f, Offset.Zero)
+        return
+    }
+    animate(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = tween(durationMillis = 320),
+    ) { progress, _ ->
+        onUpdate(
+            currentZoom + (1f - currentZoom) * progress,
+            currentPan * (1f - progress),
+        )
+    }
 }
 
 private fun viewportTransform(

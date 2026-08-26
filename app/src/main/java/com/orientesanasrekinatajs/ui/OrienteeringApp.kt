@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,12 +17,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.Icons
@@ -37,10 +42,12 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -64,16 +71,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.size
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
@@ -91,6 +112,7 @@ import com.orientesanasrekinatajs.ui.components.ImageSourceScreen
 import com.orientesanasrekinatajs.ui.components.InteractiveCornerCanvas
 import com.orientesanasrekinatajs.ui.components.InteractiveControlPointCanvas
 import com.orientesanasrekinatajs.ui.components.RouteDetailsBottomSheet
+import com.orientesanasrekinatajs.ui.components.RouteEditorBottomSheet
 import com.orientesanasrekinatajs.ui.components.RouteRenderingCanvas
 import com.orientesanasrekinatajs.ui.processing.MapProcessingStage
 import com.orientesanasrekinatajs.ui.processing.MapProcessingUiState
@@ -135,6 +157,7 @@ fun OrienteeringApp(
     onUpdateUsageTips: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val focusManager = LocalFocusManager.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showRecentMaps by rememberSaveable { mutableStateOf(false) }
     var usageTipDismissedForUri by rememberSaveable { mutableStateOf<String?>(null) }
@@ -155,7 +178,7 @@ fun OrienteeringApp(
     val canNavigateHome = processingState.stage != MapProcessingStage.IDLE || processingState.error != null
     BackHandler(enabled = canNavigateHome, onBack = onReset)
 
-    Surface(modifier = modifier) {
+    Surface(modifier = modifier.clearFocusOnPointerDown(focusManager)) {
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier
@@ -255,6 +278,13 @@ fun OrienteeringApp(
     }
 }
 
+private fun Modifier.clearFocusOnPointerDown(focusManager: FocusManager): Modifier = pointerInput(focusManager) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        focusManager.clearFocus(force = true)
+    }
+}
+
 @Composable
 private fun BackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
     IconButton(onClick = onBack, modifier = modifier) {
@@ -263,7 +293,11 @@ private fun BackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ScreenTopBar(title: String, onBack: () -> Unit) {
+private fun ScreenTopBar(
+    title: String,
+    onBack: () -> Unit,
+    action: (@Composable () -> Unit)? = null,
+) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         Box(Modifier.fillMaxWidth().height(48.dp)) {
             BackButton(onBack, Modifier.align(Alignment.CenterStart))
@@ -273,6 +307,9 @@ private fun ScreenTopBar(title: String, onBack: () -> Unit) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.align(Alignment.Center),
             )
+            action?.let { content ->
+                Box(Modifier.align(Alignment.CenterEnd)) { content() }
+            }
         }
     }
 }
@@ -561,9 +598,12 @@ private fun EditMapScreen(
     var showHelp by rememberSaveable(processingState.sourceUri?.toString()) { mutableStateOf(showUsageTips) }
     var selectedPointId by rememberSaveable { mutableStateOf<String?>(null) }
     var newPointId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pointEditBaseline by remember { mutableStateOf<List<ControlPoint>?>(null) }
+    var editedPoints by remember { mutableStateOf<List<ControlPoint>?>(null) }
     var confirmLineReset by rememberSaveable { mutableStateOf(false) }
     var confirmPointsClear by rememberSaveable { mutableStateOf(false) }
     var confirmLeaveEdit by rememberSaveable { mutableStateOf(false) }
+    var confirmDiscardPointChanges by rememberSaveable { mutableStateOf(false) }
     var viewportCenterPoint by remember(rectified) {
         mutableStateOf(Point2D(rectified.width / 2f, rectified.height / 2f))
     }
@@ -584,9 +624,47 @@ private fun EditMapScreen(
         RouteMode.TARGET_SCORE -> targetScoreText.toIntOrNull()?.let { it > 0 } == true
     }
 
-    val leaveSubEditor = { editMode = EditMode.CALIBRATION }
+    val visiblePoints = editedPoints ?: processingState.controlPoints
+    val pointChangesPending = pointEditBaseline?.let { original -> visiblePoints != original } == true
+    val discardPointChanges: () -> Unit = {
+        pointEditBaseline = null
+        editedPoints = null
+        selectedPointId = null
+        newPointId = null
+        editMode = EditMode.CALIBRATION
+    }
+    val requestDiscardPointChanges: () -> Unit = {
+        if (pointChangesPending) confirmDiscardPointChanges = true else discardPointChanges()
+    }
+    val savePointChanges: () -> Unit = {
+        val original = pointEditBaseline ?: processingState.controlPoints
+        val updated = editedPoints ?: original
+        val originalById = original.associateBy(ControlPoint::id)
+        val updatedIds = updated.mapTo(mutableSetOf(), ControlPoint::id)
+        if (original.isNotEmpty() && updated.isEmpty()) {
+            onClearControlPoints()
+        } else {
+            original.filterNot { it.id in updatedIds }.forEach { onRemoveControlPoint(it.id) }
+            updated.forEach { point ->
+                val previous = originalById[point.id]
+                when {
+                    previous == null -> onAddControlPoint(point)
+                    previous != point -> onUpdateControlPoint(point)
+                }
+            }
+        }
+        pointEditBaseline = null
+        editedPoints = null
+        selectedPointId = null
+        newPointId = null
+        editMode = EditMode.CALIBRATION
+    }
     val requestBack = {
-        if (editMode != EditMode.CALIBRATION) leaveSubEditor() else confirmLeaveEdit = true
+        when (editMode) {
+            EditMode.POINTS -> requestDiscardPointChanges()
+            EditMode.CORNERS -> editMode = EditMode.CALIBRATION
+            EditMode.CALIBRATION -> confirmLeaveEdit = true
+        }
     }
     BackHandler(onBack = requestBack)
 
@@ -600,6 +678,18 @@ private fun EditMapScreen(
                 },
             ),
             onBack = requestBack,
+            action = if (editMode == EditMode.POINTS && visiblePoints.isNotEmpty()) {
+                {
+                    IconButton(onClick = { confirmPointsClear = true }) {
+                        Icon(
+                            Icons.Default.DeleteForever,
+                            contentDescription = stringResource(R.string.clear_points),
+                        )
+                    }
+                }
+            } else {
+                null
+            },
         )
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -622,9 +712,11 @@ private fun EditMapScreen(
                     }
                     EditMode.POINTS -> InteractiveControlPointCanvas(
                         bitmap = rectified,
-                        points = processingState.controlPoints,
+                        points = visiblePoints,
                         rotationQuarterTurns = rotation,
-                        onPointMoved = onUpdateControlPoint,
+                        onPointMoved = { moved ->
+                            editedPoints = visiblePoints.map { if (it.id == moved.id) moved else it }
+                        },
                         onPointSelected = { selectedPointId = it.id },
                         onViewportCenterChange = { viewportCenterPoint = it },
                         recenterKey = recenterKey,
@@ -644,31 +736,33 @@ private fun EditMapScreen(
                 MapOverlayButtons(
                     onRotate = { onRotationChange(rotation + 1) },
                     onRecenter = { recenterKey++ },
-                    onResetLine = if (editMode == EditMode.CALIBRATION) {
-                        { confirmLineReset = true }
-                    } else {
-                        null
-                    },
-                    onClearPoints = if (editMode == EditMode.POINTS && processingState.controlPoints.isNotEmpty()) {
-                        { confirmPointsClear = true }
-                    } else {
-                        null
-                    },
-                    onAddPoint = if (editMode == EditMode.POINTS) {
-                        {
-                            val point = ControlPoint(
-                                code = 0,
-                                center = viewportCenterPoint,
-                            )
-                            onAddControlPoint(point)
-                            selectedPointId = point.id
-                            newPointId = point.id
-                        }
-                    } else {
-                        null
-                    },
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 )
+                if (editMode == EditMode.POINTS) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp).size(56.dp),
+                        shape = CircleShape,
+                        color = Color.White,
+                        contentColor = Color.Black,
+                        tonalElevation = 5.dp,
+                    ) {
+                        IconButton(
+                            onClick = {
+                                val point = ControlPoint(code = 0, center = viewportCenterPoint)
+                                editedPoints = visiblePoints + point
+                                selectedPointId = point.id
+                                newPointId = point.id
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            Icon(
+                                Icons.Default.AddLocationAlt,
+                                contentDescription = stringResource(R.string.add_point),
+                                modifier = Modifier.size(28.dp),
+                            )
+                        }
+                    }
+                }
             }
 
             when (editMode) {
@@ -680,21 +774,22 @@ private fun EditMapScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 ) { Text(stringResource(R.string.apply_corners)) }
 
-                EditMode.POINTS -> Button(
-                    onClick = { editMode = EditMode.CALIBRATION },
+                EditMode.POINTS -> Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                ) { Text(stringResource(R.string.done_editing_points)) }
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = requestDiscardPointChanges,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.discard_changes), textAlign = TextAlign.Center)
+                    }
+                    Button(onClick = savePointChanges, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.save_points), textAlign = TextAlign.Center)
+                    }
+                }
 
                 EditMode.CALIBRATION -> {
-                    OutlinedTextField(
-                        value = lineDistanceText,
-                        onValueChange = onLineDistanceChange,
-                        enabled = lineEnd != null,
-                        label = { Text(stringResource(R.string.line_distance)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    )
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -707,12 +802,43 @@ private fun EditMapScreen(
                             Text(stringResource(R.string.edit_corners), modifier = Modifier.padding(start = 6.dp))
                         }
                         OutlinedButton(
-                            onClick = { editMode = EditMode.POINTS },
+                            onClick = {
+                                val points = processingState.controlPoints.map(ControlPoint::copy)
+                                pointEditBaseline = points
+                                editedPoints = points
+                                editMode = EditMode.POINTS
+                            },
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Default.Edit, contentDescription = null)
                             Text(stringResource(R.string.edit_points), modifier = Modifier.padding(start = 6.dp))
                         }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedButton(
+                            onClick = { confirmLineReset = true },
+                            enabled = lineStart != null || lineEnd != null || lineDistanceText.isNotEmpty(),
+                            modifier = Modifier.size(56.dp).offset(y = 2.dp),
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.DeleteSweep,
+                                contentDescription = stringResource(R.string.reset_line),
+                            )
+                        }
+                        OutlinedTextField(
+                            value = lineDistanceText,
+                            onValueChange = onLineDistanceChange,
+                            enabled = lineEnd != null,
+                            label = { Text(stringResource(R.string.line_distance)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -834,21 +960,38 @@ private fun EditMapScreen(
             onDismiss = { confirmLeaveEdit = false },
         )
     }
+    if (confirmDiscardPointChanges) {
+        ConfirmationDialog(
+            title = stringResource(R.string.discard_point_changes_title),
+            message = stringResource(R.string.discard_point_changes_confirmation),
+            onConfirm = {
+                confirmDiscardPointChanges = false
+                discardPointChanges()
+            },
+            onDismiss = { confirmDiscardPointChanges = false },
+        )
+    }
 
     selectedPointId?.let { id ->
-        processingState.controlPoints.firstOrNull { it.id == id }?.let { point ->
+        visiblePoints.firstOrNull { it.id == id }?.let { point ->
             ControlPointEditorDialog(
                 point = point,
                 isNew = point.id == newPointId,
-                onSave = {
-                    onUpdateControlPoint(it)
+                onSave = { savedPoint ->
+                    editedPoints = visiblePoints.map {
+                        if (it.id == savedPoint.id) savedPoint else it
+                    }
                     newPointId = null
                     selectedPointId = null
                 },
-                onDelete = { onRemoveControlPoint(point.id); selectedPointId = null },
+                onDelete = {
+                    editedPoints = visiblePoints.filterNot { it.id == point.id }
+                    newPointId = null
+                    selectedPointId = null
+                },
                 onDismiss = {
                     if (point.id == newPointId) {
-                        onRemoveControlPoint(point.id)
+                        editedPoints = visiblePoints.filterNot { it.id == point.id }
                         newPointId = null
                     }
                     selectedPointId = null
@@ -881,7 +1024,9 @@ private fun EditMapScreen(
             title = stringResource(R.string.clear_points_title),
             message = stringResource(R.string.clear_points_confirmation),
             onConfirm = {
-                onClearControlPoints()
+                editedPoints = emptyList()
+                selectedPointId = null
+                newPointId = null
                 confirmPointsClear = false
             },
             onDismiss = { confirmPointsClear = false },
@@ -894,9 +1039,6 @@ private fun MapOverlayButtons(
     onRotate: () -> Unit,
     modifier: Modifier = Modifier,
     onRecenter: (() -> Unit)? = null,
-    onResetLine: (() -> Unit)? = null,
-    onAddPoint: (() -> Unit)? = null,
-    onClearPoints: (() -> Unit)? = null,
     onEditMap: (() -> Unit)? = null,
 ) {
     Surface(
@@ -931,33 +1073,6 @@ private fun MapOverlayButtons(
                     )
                 }
             }
-            onResetLine?.let { reset ->
-                IconButton(onClick = reset, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        Icons.Default.DeleteSweep,
-                        contentDescription = stringResource(R.string.reset_line),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            onClearPoints?.let { clear ->
-                IconButton(onClick = clear, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        Icons.Default.DeleteForever,
-                        contentDescription = stringResource(R.string.clear_points),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            onAddPoint?.let { add ->
-                IconButton(onClick = add, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        Icons.Default.AddLocationAlt,
-                        contentDescription = stringResource(R.string.add_point),
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
         }
     }
 }
@@ -970,12 +1085,14 @@ private fun ControlPointEditorDialog(
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
     var codeText by rememberSaveable(point.id) {
         mutableStateOf(if (isNew) "" else point.code.toString())
     }
     var type by rememberSaveable(point.id) { mutableStateOf(point.type) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.clearFocusOnPointerDown(focusManager),
         title = {
             CenteredDialogTitle(
                 stringResource(if (isNew) R.string.add_point else R.string.edit_point),
@@ -1065,10 +1182,36 @@ private fun RouteScreen(
     onEdit: () -> Unit,
     onHome: () -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val routeMenuGapPx = with(density) { 16.dp.roundToPx() }
+    val routeMenuPositionProvider = remember(routeMenuGapPx) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect,
+                windowSize: IntSize,
+                layoutDirection: LayoutDirection,
+                popupContentSize: IntSize,
+            ): IntOffset = IntOffset(
+                x = anchorBounds.left.coerceIn(
+                    0,
+                    (windowSize.width - popupContentSize.width).coerceAtLeast(0),
+                ),
+                y = (anchorBounds.top - routeMenuGapPx - popupContentSize.height).coerceIn(
+                    0,
+                    (windowSize.height - popupContentSize.height).coerceAtLeast(0),
+                ),
+            )
+        }
+    }
     var showDetails by rememberSaveable { mutableStateOf(false) }
     var recenterKey by rememberSaveable { mutableIntStateOf(0) }
     var showRename by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showUnsavedHomeConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showRouteMenu by rememberSaveable { mutableStateOf(false) }
+    var showRouteEditor by rememberSaveable { mutableStateOf(false) }
+    var showRouteRestrictions by rememberSaveable { mutableStateOf(false) }
     var renameText by rememberSaveable(savedMapId, savedMapName) { mutableStateOf(savedMapName.orEmpty()) }
     val higherScoreRoutes = alternativeRoutes.take(nextLongestRouteCount)
     val lowerScoreRoutes = alternativeRoutes.drop(nextLongestRouteCount)
@@ -1095,7 +1238,16 @@ private fun RouteScreen(
     Column(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
             Box(Modifier.fillMaxWidth().height(48.dp)) {
-                IconButton(onClick = onHome, modifier = Modifier.align(Alignment.CenterStart)) {
+                IconButton(
+                    onClick = {
+                        if (isDirty || savedMapId == null) {
+                            showUnsavedHomeConfirmation = true
+                        } else {
+                            onHome()
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.CenterStart),
+                ) {
                     Icon(Icons.Default.Home, contentDescription = stringResource(R.string.home))
                 }
                 Row(
@@ -1138,7 +1290,10 @@ private fun RouteScreen(
                     }
                     if (savedMapId != null && !isDirty) {
                         IconButton(onClick = { showDeleteConfirmation = true }) {
-                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete_saved_route))
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = stringResource(R.string.delete_saved_route),
+                            )
                         }
                     }
                 }
@@ -1156,7 +1311,6 @@ private fun RouteScreen(
             MapOverlayButtons(
                 onRotate = { onRotationChange(rotation + 1) },
                 onRecenter = { recenterKey++ },
-                onEditMap = onEdit,
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
         }
@@ -1178,15 +1332,62 @@ private fun RouteScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedButton(
-                    onClick = {},
-                    enabled = false,
-                    modifier = Modifier.size(48.dp),
-                    contentPadding = PaddingValues(0.dp),
-                ) {
-                    Icon(Icons.Default.MoreHoriz, contentDescription = null)
+                Box {
+                    OutlinedButton(
+                        onClick = { showRouteMenu = true },
+                        modifier = Modifier.size(48.dp),
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Icon(Icons.Default.MoreHoriz, contentDescription = stringResource(R.string.route_actions))
+                    }
+                    if (showRouteMenu) {
+                        Popup(
+                            popupPositionProvider = routeMenuPositionProvider,
+                            onDismissRequest = { showRouteMenu = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            Surface(
+                                modifier = Modifier.width(IntrinsicSize.Max),
+                                shape = MaterialTheme.shapes.extraSmall,
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 3.dp,
+                                shadowElevation = 8.dp,
+                            ) {
+                                Column {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.edit_map)) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                        onClick = { showRouteMenu = false; onEdit() },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.edit_route)) },
+                                        leadingIcon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) },
+                                        onClick = { showRouteMenu = false; showRouteEditor = true },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.route_restrictions)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.DeleteForever, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showRouteMenu = false
+                                            showRouteRestrictions = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.export_route)) },
+                                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                        onClick = { showRouteMenu = false },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
-                OutlinedButton(onClick = { showDetails = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { showDetails = true },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) {
                     Text(stringResource(R.string.show_route_details))
                 }
             }
@@ -1209,9 +1410,44 @@ private fun RouteScreen(
             onDismissRequest = { showDetails = false },
         )
     }
+    if (showRouteEditor) {
+        RouteEditorBottomSheet(
+            route = displayedRoute,
+            onDismissRequest = { showRouteEditor = false },
+        )
+    }
+    if (showRouteRestrictions) {
+        AlertDialog(
+            onDismissRequest = { showRouteRestrictions = false },
+            title = { CenteredDialogTitle(stringResource(R.string.route_restrictions)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.route_restrictions_placeholder))
+                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.blacklist_control))
+                    }
+                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.blacklist_connection))
+                    }
+                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.mandatory_control))
+                    }
+                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.mandatory_connection))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRouteRestrictions = false }) {
+                    Text(stringResource(R.string.close))
+                }
+            },
+        )
+    }
     if (showRename) {
         AlertDialog(
             onDismissRequest = { showRename = false },
+            modifier = Modifier.clearFocusOnPointerDown(focusManager),
             title = { CenteredDialogTitle(stringResource(R.string.rename_route)) },
             text = {
                 OutlinedTextField(
@@ -1238,6 +1474,14 @@ private fun RouteScreen(
             message = stringResource(R.string.delete_saved_route_confirmation),
             onConfirm = { showDeleteConfirmation = false; onDelete() },
             onDismiss = { showDeleteConfirmation = false },
+        )
+    }
+    if (showUnsavedHomeConfirmation) {
+        ConfirmationDialog(
+            title = stringResource(R.string.leave_unsaved_route_title),
+            message = stringResource(R.string.leave_unsaved_route_confirmation),
+            onConfirm = { showUnsavedHomeConfirmation = false; onHome() },
+            onDismiss = { showUnsavedHomeConfirmation = false },
         )
     }
 }
