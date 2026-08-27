@@ -25,6 +25,7 @@ android {
 
         // Compile remove x86/x86_64 instructions, may cause incompatability
         ndk {
+            //noinspection ChromeOsAbiSupport
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }

@@ -41,11 +41,11 @@ class PreferencesRepositoryTest {
     fun mapRotationGesturesAreOnByDefaultAndCanBeDisabled() = runBlocking {
         val repository = PreferencesRepository(FakeDataStore(mutablePreferencesOf()))
 
-        assertEquals(true, repository.userPreferencesFlow.first().enableMapRotationGestures)
+        assertEquals(false, repository.userPreferencesFlow.first().disableMapRotationGestures)
 
-        repository.updateMapRotationGestures(false)
+        repository.updateMapRotationGestures(true)
 
-        assertFalse(repository.userPreferencesFlow.first().enableMapRotationGestures)
+        assertFalse(repository.userPreferencesFlow.first().disableMapRotationGestures)
     }
 
     @Test

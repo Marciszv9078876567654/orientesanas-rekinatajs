@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.ListAlt
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ContentCopy
@@ -226,7 +225,7 @@ fun OrienteeringApp(
     }
     var mapRotationOffsetDegrees by rememberSaveable(rotationSessionKey) { mutableFloatStateOf(0f) }
     val applyRotationGesture: (Float) -> Unit = { change ->
-        if (userPreferences.enableMapRotationGestures && change.isFinite()) {
+        if (userPreferences.disableMapRotationGestures && change.isFinite()) {
             mapRotationOffsetDegrees = (mapRotationOffsetDegrees + change) % 360f
         }
     }
@@ -266,7 +265,7 @@ fun OrienteeringApp(
                     error = processingState.error,
                     rotation = mapRotation,
                     rotationOffsetDegrees = mapRotationOffsetDegrees,
-                    rotationGesturesEnabled = userPreferences.enableMapRotationGestures,
+                    rotationGesturesEnabled = userPreferences.disableMapRotationGestures,
                     onRotationGesture = applyRotationGesture,
                     onSnapRotation = snapMapRotation,
                     onRotationChange = setMapRotation,
@@ -303,7 +302,7 @@ fun OrienteeringApp(
                     isTransferringMap = mapTransferState.isWorking,
                     rotation = mapRotation,
                     rotationOffsetDegrees = mapRotationOffsetDegrees,
-                    rotationGesturesEnabled = userPreferences.enableMapRotationGestures,
+                    rotationGesturesEnabled = userPreferences.disableMapRotationGestures,
                     onRotationGesture = applyRotationGesture,
                     onSnapRotation = snapMapRotation,
                     onRotationChange = setMapRotation,
@@ -3273,7 +3272,7 @@ private fun SettingsDialog(
                         style = MaterialTheme.typography.labelLarge,
                     )
                     Switch(
-                        checked = preferences.enableMapRotationGestures,
+                        checked = preferences.disableMapRotationGestures,
                         onCheckedChange = onUpdateMapRotationGestures,
                         modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
                     )

@@ -65,7 +65,7 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 themeConfig = enumPreference(preferences[THEME_KEY], ThemeConfig.SYSTEM),
                 language = enumPreference(preferences[LANG_KEY], LanguageConfig.SYSTEM),
                 useAnimations = preferences[ANIM_KEY] ?: true,
-                enableMapRotationGestures = preferences[MAP_ROTATION_GESTURES_KEY] ?: true,
+                disableMapRotationGestures = preferences[MAP_ROTATION_GESTURES_KEY] ?: false,
                 showPointsPerKilometer = preferences[POINTS_PER_KM_KEY] ?: false,
                 showUsageTips = preferences[USAGE_TIPS_KEY] ?: true,
                 distanceUnit = enumPreference(preferences[UNIT_KEY], DistanceUnit.METRIC),
