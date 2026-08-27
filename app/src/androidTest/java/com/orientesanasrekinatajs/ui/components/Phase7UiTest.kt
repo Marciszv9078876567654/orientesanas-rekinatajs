@@ -70,6 +70,22 @@ class Phase7UiTest {
     }
 
     @Test
+    fun defaultScale_acceptsPanGestures() {
+        val (zoom, pan) = updatedViewportForGesture(
+            zoomChange = 1f,
+            panChange = Offset(24f, -12f),
+            centroid = Offset(100f, 100f),
+            viewportCenter = Offset(100f, 100f),
+            currentZoom = 1f,
+            currentPan = Offset.Zero,
+        )
+
+        assertEquals(1f, zoom, 0.001f)
+        assertEquals(24f, pan.x, 0.001f)
+        assertEquals(-12f, pan.y, 0.001f)
+    }
+
+    @Test
     fun distanceCalibrationCanvas_rendersZoomableTwoPointLine() {
         val bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
         var composed = false

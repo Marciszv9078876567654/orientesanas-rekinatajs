@@ -7,6 +7,8 @@ import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.RouteSegment
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
+import com.orientesanasrekinatajs.domain.model.RouteRestriction
+import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
 import com.orientesanasrekinatajs.domain.routing.DistanceMatrix
 import com.orientesanasrekinatajs.domain.routing.RoutingAlgorithms
 import kotlinx.coroutines.CancellationException
@@ -33,6 +35,13 @@ sealed interface RouteManagementAction {
     data class Select(val routeId: String) : RouteManagementAction
 }
 
+sealed interface RouteRestrictionAction {
+    data class Add(val restriction: RouteRestriction) : RouteRestrictionAction
+    data class ToggleStar(val restrictionId: String) : RouteRestrictionAction
+    data class Delete(val restrictionId: String) : RouteRestrictionAction
+    data object DeleteAllUnstarred : RouteRestrictionAction
+}
+
 data class AlternativeRouteCriteria(
     val count: Int,
     val sourceRouteId: String? = null,
@@ -41,6 +50,7 @@ data class AlternativeRouteCriteria(
     val minScore: Int? = null,
     val maxScore: Int? = null,
     val useRelativeValues: Boolean = false,
+    val fixedPrefixPointCount: Int = 1,
 )
 
 data class RoutingUiState(
@@ -55,6 +65,7 @@ data class RoutingUiState(
     val budgetMeters: Float? = null,
     val targetScore: Int? = null,
     val routeMetadata: Map<String, RouteMetadata> = emptyMap(),
+    val routeRestrictions: List<RouteRestriction> = emptyList(),
     val error: String? = null,
 )
 
@@ -87,7 +98,14 @@ class RoutingViewModel internal constructor(
             )
             runCatching {
                 withContext(workerDispatcher) {
-                    calculate(points, pixelsPerMeter, mode, budgetMeters, targetScore)
+                    calculate(
+                        points,
+                        pixelsPerMeter,
+                        mode,
+                        budgetMeters,
+                        targetScore,
+                        previous.routeRestrictions,
+                    )
                 }
             }.onSuccess { result ->
                 val currentRoutes = listOfNotNull(previous.route) + previous.alternativeRoutes
@@ -160,6 +178,7 @@ class RoutingViewModel internal constructor(
         mode: RouteMode,
         budgetMeters: Float?,
         targetScore: Int?,
+        routeRestrictions: List<RouteRestriction> = emptyList(),
     ) {
         routingJob?.cancel()
         val legacySelectedRoute = runCatching {
@@ -212,6 +231,38 @@ class RoutingViewModel internal constructor(
             budgetMeters = budgetMeters,
             targetScore = targetScore,
             routeMetadata = normalizedMetadata,
+            routeRestrictions = routeRestrictions,
+        )
+    }
+
+    fun openSavedRestrictions(restrictions: List<RouteRestriction>) {
+        _uiState.value = _uiState.value.copy(routeRestrictions = restrictions)
+    }
+
+    fun manageRouteRestrictions(action: RouteRestrictionAction) {
+        routingJob?.cancel()
+        val current = _uiState.value
+        val updated = when (action) {
+            is RouteRestrictionAction.Add -> {
+                if (current.routeRestrictions.any { it.sameRuleAs(action.restriction) }) {
+                    current.routeRestrictions
+                } else current.routeRestrictions + action.restriction
+            }
+            is RouteRestrictionAction.ToggleStar -> current.routeRestrictions.map { restriction ->
+                if (restriction.id == action.restrictionId) {
+                    restriction.copy(isStarred = !restriction.isStarred)
+                } else restriction
+            }
+            is RouteRestrictionAction.Delete -> current.routeRestrictions.filterNot { restriction ->
+                restriction.id == action.restrictionId && !restriction.isStarred
+            }
+            RouteRestrictionAction.DeleteAllUnstarred ->
+                current.routeRestrictions.filter(RouteRestriction::isStarred)
+        }
+        _uiState.value = current.copy(
+            routeRestrictions = updated,
+            isCalculating = false,
+            isGeneratingAlternatives = false,
         )
     }
 
@@ -299,7 +350,7 @@ class RoutingViewModel internal constructor(
             runCatching {
                 withContext(workerDispatcher) {
                     val matrix = DistanceMatrix(points.distinctBy(ControlPoint::id), pixelsPerMeter)
-                    buildAlternativeRoutes(source, matrix, criteria)
+                    buildAlternativeRoutes(source, matrix, criteria, current.routeRestrictions)
                 }
             }.onSuccess { alternatives ->
                 val latest = _uiState.value
@@ -353,6 +404,7 @@ class RoutingViewModel internal constructor(
         mode: RouteMode,
         budgetMeters: Float?,
         targetScore: Int?,
+        restrictions: List<RouteRestriction>,
     ): RouteCalculation {
         require(pixelsPerMeter.isFinite() && pixelsPerMeter > 0f) {
             "Map scale must be a positive number of pixels per meter"
@@ -362,11 +414,17 @@ class RoutingViewModel internal constructor(
         val explicitFinishes = points.filter { it.type == ControlPointType.FINISH }
         val start = uniqueEndpoint(explicitStarts.ifEmpty { combinedEndpoints }, "start")
         val finish = uniqueEndpoint(explicitFinishes.ifEmpty { combinedEndpoints }, "finish")
-        val controls = points.filter { it.type == ControlPointType.CONTROL }
+        validateRestrictions(points, restrictions)
+        val blacklistedControlIds = restrictions
+            .filter { it.type == RouteRestrictionType.BLACKLIST_CONTROL }
+            .mapTo(mutableSetOf(), RouteRestriction::firstPointId)
+        val controls = points.filter {
+            it.type == ControlPointType.CONTROL && it.id !in blacklistedControlIds
+        }
         val matrixPoints = (listOf(start, finish) + controls).distinctBy(ControlPoint::id)
         val matrix = DistanceMatrix(matrixPoints, pixelsPerMeter)
 
-        val path = when (mode) {
+        val unrestrictedPath = when (mode) {
             RouteMode.SHORTEST -> RoutingAlgorithms.shortestRoute(matrix, start, finish, controls)
             RouteMode.BEST_SCORE -> {
                 val budget = requireNotNull(budgetMeters) {
@@ -383,7 +441,18 @@ class RoutingViewModel internal constructor(
                 requireNotNull(targetScore) { "A target score is required" },
             )
         }
+        val path = applyRestrictions(unrestrictedPath, matrix, restrictions)
         val primary = assembleRoute(path, matrix)
+        if (mode == RouteMode.BEST_SCORE) {
+            require(primary.totalDistanceMeters <= requireNotNull(budgetMeters) + DISTANCE_EPSILON) {
+                "Mandatory route restrictions exceed the distance budget"
+            }
+        }
+        if (mode == RouteMode.TARGET_SCORE) {
+            require(primary.totalScore >= requireNotNull(targetScore)) {
+                "Route restrictions prevent reaching the requested score"
+            }
+        }
         return RouteCalculation(primary = primary)
     }
 
@@ -392,6 +461,7 @@ class RoutingViewModel internal constructor(
         primary: OptimizedRoute,
         matrix: DistanceMatrix,
         criteria: AlternativeRouteCriteria,
+        restrictions: List<RouteRestriction>,
     ): AlternativeRouteSet {
         require(criteria.count in 1..MAX_ALTERNATIVE_ROUTES) {
             "Alternative route count must be between 1 and $MAX_ALTERNATIVE_ROUTES"
@@ -425,19 +495,38 @@ class RoutingViewModel internal constructor(
             "Minimum score cannot exceed maximum score"
         }
 
-        val start = primary.path.first()
+        validateRestrictions(matrix.points, restrictions)
+        val fixedPrefixCount = criteria.fixedPrefixPointCount.coerceIn(1, primary.path.lastIndex)
+        val fixedPrefix = primary.path.take(fixedPrefixCount)
+        val start = fixedPrefix.last()
         val finish = primary.path.last()
+        val fixedIds = fixedPrefix.mapTo(mutableSetOf(), ControlPoint::id)
+        val blacklistedControlIds = restrictions
+            .filter { it.type == RouteRestrictionType.BLACKLIST_CONTROL }
+            .mapTo(mutableSetOf(), RouteRestriction::firstPointId)
         val controls = matrix.points.filter {
-            it.type == ControlPointType.CONTROL && it.points > 0
+            it.type == ControlPointType.CONTROL && it.points > 0 &&
+                it.id !in fixedIds && it.id !in blacklistedControlIds
         }
         val availableScore = controls.sumOf(ControlPoint::points)
         val primaryPathKey = primary.path.pathKey()
-        val candidates = (0..availableScore).asSequence()
-            .map { target ->
-                assembleRoute(
-                    RoutingAlgorithms.shortestRouteForScore(matrix, start, finish, controls, target),
-                    matrix,
-                )
+        val candidates = alternativeScoreTargets(availableScore).asSequence()
+            .mapNotNull { target ->
+                runCatching {
+                    val suffix = RoutingAlgorithms.shortestRouteForScore(
+                        matrix, start, finish, controls, target,
+                    )
+                    val combined = fixedPrefix.dropLast(1) + suffix
+                    val restricted = applyRestrictions(
+                        combined,
+                        matrix,
+                        restrictions,
+                        lockedPrefixPointCount = fixedPrefixCount,
+                    )
+                    restricted.takeIf { candidate ->
+                        candidate.take(fixedPrefixCount).pathKey() == fixedPrefix.pathKey()
+                    }?.let { assembleRoute(it, matrix) }
+                }.getOrNull()
             }
             .filter { candidate -> candidate.path.pathKey() != primaryPathKey }
             .distinctBy { candidate -> candidate.path.pathKey() }
@@ -460,6 +549,227 @@ class RoutingViewModel internal constructor(
             nextLongestCount = higherScoreRoutes.size,
         )
     }
+
+    private fun applyRestrictions(
+        originalPath: List<ControlPoint>,
+        matrix: DistanceMatrix,
+        restrictions: List<RouteRestriction>,
+        lockedPrefixPointCount: Int = 1,
+    ): List<ControlPoint> {
+        if (restrictions.isEmpty()) return originalPath
+        val pointsById = matrix.points.associateBy(ControlPoint::id)
+        val lockedCount = lockedPrefixPointCount.coerceIn(1, originalPath.size)
+        val blacklistedControls = restrictions
+            .filter { it.type == RouteRestrictionType.BLACKLIST_CONTROL }
+            .mapTo(mutableSetOf(), RouteRestriction::firstPointId)
+        require(originalPath.take(lockedCount).none { it.id in blacklistedControls }) {
+            "A fixed part of the route contains a blacklisted control"
+        }
+        var path = originalPath.filterIndexed { index, point ->
+            index < lockedCount || point.id !in blacklistedControls
+        }.toMutableList()
+        val mandatoryConnections = restrictions
+            .filter { it.type == RouteRestrictionType.MANDATORY_CONNECTION }
+            .map { it.connectionKey() }
+        val blacklistedConnections = restrictions
+            .filter { it.type == RouteRestrictionType.BLACKLIST_CONNECTION }
+            .mapTo(mutableSetOf()) { it.connectionKey() }
+        val mandatoryPointIds = buildSet {
+            restrictions.filter { it.type == RouteRestrictionType.MANDATORY_CONTROL }
+                .forEach { add(it.firstPointId) }
+            mandatoryConnections.forEach { (first, second) -> add(first); add(second) }
+        }
+        mandatoryPointIds.forEach { pointId ->
+            val point = pointsById[pointId] ?: return@forEach
+            if (point.type == ControlPointType.CONTROL && path.none { it.id == pointId }) {
+                path = insertAtCheapestAllowedEdge(
+                    path, point, matrix, lockedCount, blacklistedConnections,
+                ).toMutableList()
+            }
+        }
+
+        val enforcedConnections = mutableSetOf<Pair<String, String>>()
+        mandatoryConnections.forEach { connection ->
+            path = enforceMandatoryConnection(
+                path,
+                connection,
+                matrix,
+                lockedCount,
+                blacklistedConnections,
+                enforcedConnections,
+            ).toMutableList()
+            enforcedConnections += connection
+        }
+
+        var repairPass = 0
+        while (repairPass++ < MAX_RESTRICTION_REPAIR_PASSES) {
+            val violations = path.zipWithNext().count { (from, to) ->
+                from.id.connectionKey(to.id) in blacklistedConnections
+            }
+            if (violations == 0 && path.satisfiesMandatoryConnections(mandatoryConnections)) {
+                return path
+            }
+            val candidates = buildList {
+                path.indices
+                    .filter { index -> index >= lockedCount && index < path.lastIndex }
+                    .filter { index -> path[index].type == ControlPointType.CONTROL }
+                    .forEach { movingIndex ->
+                        val moving = path[movingIndex]
+                        val without = path.toMutableList().also { it.removeAt(movingIndex) }
+                        for (insertionIndex in lockedCount..without.lastIndex) {
+                            val candidate = without.toMutableList().also {
+                                it.add(insertionIndex, moving)
+                            }
+                            val candidateViolations = candidate.zipWithNext().count { (from, to) ->
+                                from.id.connectionKey(to.id) in blacklistedConnections
+                            }
+                            if (
+                                candidateViolations < violations &&
+                                candidate.satisfiesMandatoryConnections(mandatoryConnections)
+                            ) add(candidate)
+                        }
+                    }
+            }
+            val repaired = candidates.minByOrNull { routeDistance(it, matrix) } ?: break
+            path = repaired.toMutableList()
+        }
+        require(path.zipWithNext().none { (from, to) ->
+            from.id.connectionKey(to.id) in blacklistedConnections
+        }) { "No route satisfies the blacklisted connections" }
+        require(path.satisfiesMandatoryConnections(mandatoryConnections)) {
+            "No route satisfies the mandatory connections"
+        }
+        return path
+    }
+
+    private fun insertAtCheapestAllowedEdge(
+        path: List<ControlPoint>,
+        point: ControlPoint,
+        matrix: DistanceMatrix,
+        lockedPrefixPointCount: Int,
+        blacklistedConnections: Set<Pair<String, String>>,
+    ): List<ControlPoint> = (lockedPrefixPointCount..path.lastIndex)
+        .map { insertionIndex -> path.toMutableList().also { it.add(insertionIndex, point) } }
+        .filter { candidate -> candidate.zipWithNext().none { (from, to) ->
+            (from.id == point.id || to.id == point.id) &&
+                from.id.connectionKey(to.id) in blacklistedConnections
+        } }
+        .minByOrNull { routeDistance(it, matrix) }
+        ?: throw IllegalArgumentException("No route can include a mandatory control")
+
+    private fun enforceMandatoryConnection(
+        path: List<ControlPoint>,
+        connection: Pair<String, String>,
+        matrix: DistanceMatrix,
+        lockedPrefixPointCount: Int,
+        blacklistedConnections: Set<Pair<String, String>>,
+        alreadyEnforced: Set<Pair<String, String>>,
+    ): List<ControlPoint> {
+        if (path.hasConnection(connection)) return path
+        val existingBlacklistViolations = path.zipWithNext().count { (from, to) ->
+            from.id.connectionKey(to.id) in blacklistedConnections
+        }
+        val candidates = buildList {
+            listOf(connection.first to connection.second, connection.second to connection.first)
+                .forEach { (movingId, anchorId) ->
+                    val movingIndex = path.indexOfFirst { it.id == movingId }
+                    if (movingIndex < lockedPrefixPointCount || movingIndex >= path.lastIndex ||
+                        path.getOrNull(movingIndex)?.type != ControlPointType.CONTROL
+                    ) return@forEach
+                    val moving = path[movingIndex]
+                    val without = path.toMutableList().also { it.removeAt(movingIndex) }
+                    val anchorIndex = without.indexOfFirst { it.id == anchorId }
+                    listOf(anchorIndex, anchorIndex + 1)
+                        .filter { it in lockedPrefixPointCount..without.lastIndex }
+                        .forEach { insertionIndex ->
+                            val candidate = without.toMutableList().also { it.add(insertionIndex, moving) }
+                            if (
+                                candidate.hasConnection(connection) &&
+                                candidate.satisfiesMandatoryConnections(alreadyEnforced) &&
+                                candidate.zipWithNext().count { (from, to) ->
+                                    from.id.connectionKey(to.id) in blacklistedConnections
+                                } <= existingBlacklistViolations
+                            ) add(candidate)
+                        }
+                }
+        }
+        return candidates.minByOrNull { routeDistance(it, matrix) }
+            ?: throw IllegalArgumentException("No route satisfies a mandatory connection")
+    }
+
+    private fun validateRestrictions(
+        points: List<ControlPoint>,
+        restrictions: List<RouteRestriction>,
+    ) {
+        val pointsById = points.associateBy(ControlPoint::id)
+        restrictions.forEach { restriction ->
+            require(restriction.firstPointId in pointsById) { "A restricted point no longer exists" }
+            if (restriction.type in CONNECTION_RESTRICTION_TYPES) {
+                val secondId = requireNotNull(restriction.secondPointId) {
+                    "A connection restriction needs two points"
+                }
+                require(secondId in pointsById && secondId != restriction.firstPointId) {
+                    "A connection restriction needs two different existing points"
+                }
+            } else {
+                require(pointsById[restriction.firstPointId]?.type == ControlPointType.CONTROL) {
+                    "Control restrictions can only target control points"
+                }
+            }
+        }
+        val blacklistedControls = restrictions
+            .filter { it.type == RouteRestrictionType.BLACKLIST_CONTROL }
+            .mapTo(mutableSetOf(), RouteRestriction::firstPointId)
+        val mandatoryPoints = restrictions
+            .filter { it.type == RouteRestrictionType.MANDATORY_CONTROL }
+            .mapTo(mutableSetOf(), RouteRestriction::firstPointId)
+        restrictions.filter { it.type == RouteRestrictionType.MANDATORY_CONNECTION }
+            .forEach { mandatoryPoints += it.pointIds }
+        require(blacklistedControls.intersect(mandatoryPoints).isEmpty()) {
+            "A point cannot be both blacklisted and mandatory"
+        }
+        val blacklistedConnections = restrictions
+            .filter { it.type == RouteRestrictionType.BLACKLIST_CONNECTION }
+            .mapTo(mutableSetOf()) { it.connectionKey() }
+        val mandatoryConnections = restrictions
+            .filter { it.type == RouteRestrictionType.MANDATORY_CONNECTION }
+            .mapTo(mutableSetOf()) { it.connectionKey() }
+        require(blacklistedConnections.intersect(mandatoryConnections).isEmpty()) {
+            "A connection cannot be both blacklisted and mandatory"
+        }
+    }
+
+    private fun alternativeScoreTargets(availableScore: Int): List<Int> =
+        if (availableScore <= MAX_ALTERNATIVE_TARGET_ATTEMPTS) {
+            (0..availableScore).toList()
+        } else {
+            (0..MAX_ALTERNATIVE_TARGET_ATTEMPTS).map { attempt ->
+                (availableScore.toLong() * attempt / MAX_ALTERNATIVE_TARGET_ATTEMPTS).toInt()
+            }.distinct()
+        }
+
+    private fun routeDistance(path: List<ControlPoint>, matrix: DistanceMatrix): Float =
+        path.zipWithNext().sumOf { (from, to) -> matrix[from, to].toDouble() }.toFloat()
+
+    private fun List<ControlPoint>.hasConnection(connection: Pair<String, String>): Boolean =
+        zipWithNext().any { (from, to) -> from.id.connectionKey(to.id) == connection }
+
+    private fun List<ControlPoint>.satisfiesMandatoryConnections(
+        mandatory: Collection<Pair<String, String>>,
+    ): Boolean = mandatory.all { connection -> hasConnection(connection) }
+
+    private fun RouteRestriction.connectionKey(): Pair<String, String> =
+        firstPointId.connectionKey(requireNotNull(secondPointId))
+
+    private fun String.connectionKey(other: String): Pair<String, String> =
+        if (this <= other) this to other else other to this
+
+    private fun RouteRestriction.sameRuleAs(other: RouteRestriction): Boolean =
+        type == other.type && when (type) {
+            RouteRestrictionType.BLACKLIST_CONNECTION,
+            RouteRestrictionType.MANDATORY_CONNECTION -> connectionKey() == other.connectionKey()
+            else -> firstPointId == other.firstPointId
+        }
 
     private fun List<ControlPoint>.pathKey(): String = joinToString("|") { it.id }
 
@@ -564,7 +874,13 @@ class RoutingViewModel internal constructor(
 
     private companion object {
         const val MAX_ALTERNATIVE_ROUTES = 20
+        const val MAX_ALTERNATIVE_TARGET_ATTEMPTS = 500
+        const val MAX_RESTRICTION_REPAIR_PASSES = 64
         const val DISTANCE_EPSILON = 0.0001f
         const val ROUTE_COLOR_COUNT = 10
+        val CONNECTION_RESTRICTION_TYPES = setOf(
+            RouteRestrictionType.BLACKLIST_CONNECTION,
+            RouteRestrictionType.MANDATORY_CONNECTION,
+        )
     }
 }

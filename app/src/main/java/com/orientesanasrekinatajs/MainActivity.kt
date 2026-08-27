@@ -20,6 +20,7 @@ import com.orientesanasrekinatajs.ui.savedmaps.SavedMapsViewModel
 import com.orientesanasrekinatajs.ui.settings.SettingsViewModel
 import com.orientesanasrekinatajs.ui.settings.setApplicationLocale
 import com.orientesanasrekinatajs.ui.theme.OrienteeringAppTheme
+import com.orientesanasrekinatajs.ui.transfer.MapTransferViewModel
 
 class MainActivity : AppCompatActivity() {
     private val settingsViewModel: SettingsViewModel by viewModels {
@@ -32,6 +33,9 @@ class MainActivity : AppCompatActivity() {
     private val savedMapsViewModel: SavedMapsViewModel by viewModels {
         SavedMapsViewModel.factory(applicationContext)
     }
+    private val mapTransferViewModel: MapTransferViewModel by viewModels {
+        MapTransferViewModel.factory(applicationContext)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +46,7 @@ class MainActivity : AppCompatActivity() {
             val processingState by mapProcessingViewModel.uiState.collectAsStateWithLifecycle()
             val routingState by routingViewModel.uiState.collectAsStateWithLifecycle()
             val savedMapsState by savedMapsViewModel.uiState.collectAsStateWithLifecycle()
+            val mapTransferState by mapTransferViewModel.uiState.collectAsStateWithLifecycle()
 
             LaunchedEffect(userPreferences.language) {
                 setApplicationLocale(userPreferences.language)
@@ -53,6 +58,7 @@ class MainActivity : AppCompatActivity() {
                     routingState = routingState,
                     userPreferences = userPreferences,
                     savedMapsState = savedMapsState,
+                    mapTransferState = mapTransferState,
                     onImageSelected = { uri ->
                         routingViewModel.reset()
                         mapProcessingViewModel.processImage(uri)
@@ -92,6 +98,31 @@ class MainActivity : AppCompatActivity() {
                         routingViewModel.generateAlternativeRoutes(points, pixelsPerMeter, criteria)
                     },
                     onManageRoutes = routingViewModel::manageRoutes,
+                    onManageRouteRestrictions = routingViewModel::manageRouteRestrictions,
+                    onExportMap = mapTransferViewModel::export,
+                    onImportMap = { uri ->
+                        mapTransferViewModel.import(uri) { imported ->
+                            routingViewModel.reset()
+                            mapProcessingViewModel.openImportedMap(imported)
+                            routingViewModel.openSavedRestrictions(imported.routeRestrictions)
+                            imported.route?.let { importedRoute ->
+                                routingViewModel.openSavedRoute(
+                                    route = importedRoute,
+                                    alternativeRoutes = imported.alternativeRoutes,
+                                    routeMetadata = imported.routeMetadata,
+                                    points = imported.points,
+                                    pixelsPerMeter = imported.pixelsPerMeter,
+                                    selectedRoutePointIds = imported.selectedRoutePointIds,
+                                    selectedRouteId = imported.selectedRouteId,
+                                    mode = runCatching { RouteMode.valueOf(imported.routeMode) }
+                                        .getOrDefault(RouteMode.SHORTEST),
+                                    budgetMeters = imported.routeBudgetMeters,
+                                    targetScore = imported.routeTargetScore,
+                                    routeRestrictions = imported.routeRestrictions,
+                                )
+                            }
+                        }
+                    },
                     onSaveMap = { draft, onSaved ->
                         savedMapsViewModel.save(draft) { saved ->
                             mapProcessingViewModel.markSaved(saved, draft)
@@ -102,19 +133,23 @@ class MainActivity : AppCompatActivity() {
                         savedMapsViewModel.load(id) { saved ->
                             routingViewModel.reset()
                             mapProcessingViewModel.openSavedMap(saved)
-                            routingViewModel.openSavedRoute(
-                                route = saved.route,
-                                alternativeRoutes = saved.alternativeRoutes,
-                                routeMetadata = saved.routeMetadata,
-                                points = saved.points,
-                                pixelsPerMeter = saved.pixelsPerMeter,
-                                selectedRoutePointIds = saved.selectedRoutePointIds,
-                                selectedRouteId = saved.selectedRouteId,
-                                mode = runCatching { RouteMode.valueOf(saved.routeMode) }
-                                    .getOrDefault(RouteMode.SHORTEST),
-                                budgetMeters = saved.routeBudgetMeters,
-                                targetScore = saved.routeTargetScore,
-                            )
+                            routingViewModel.openSavedRestrictions(saved.routeRestrictions)
+                            saved.route?.let { savedRoute ->
+                                routingViewModel.openSavedRoute(
+                                    route = savedRoute,
+                                    alternativeRoutes = saved.alternativeRoutes,
+                                    routeMetadata = saved.routeMetadata,
+                                    points = saved.points,
+                                    pixelsPerMeter = saved.pixelsPerMeter,
+                                    selectedRoutePointIds = saved.selectedRoutePointIds,
+                                    selectedRouteId = saved.selectedRouteId,
+                                    mode = runCatching { RouteMode.valueOf(saved.routeMode) }
+                                        .getOrDefault(RouteMode.SHORTEST),
+                                    budgetMeters = saved.routeBudgetMeters,
+                                    targetScore = saved.routeTargetScore,
+                                    routeRestrictions = saved.routeRestrictions,
+                                )
+                            }
                         }
                     },
                     onRenameSavedMap = { id, name, onRenamed ->
@@ -126,6 +161,7 @@ class MainActivity : AppCompatActivity() {
                     onDeleteSavedMap = savedMapsViewModel::delete,
                     onClearAllSavedMaps = savedMapsViewModel::clearAll,
                     onDismissSavedMapsEvent = savedMapsViewModel::clearEvent,
+                    onDismissMapTransferEvent = mapTransferViewModel::clearEvent,
                     onReset = {
                         routingViewModel.reset()
                         mapProcessingViewModel.reset()

@@ -45,6 +45,7 @@ data class MapProcessingUiState(
     val savedContentDirty: Boolean = false,
     val stage: MapProcessingStage = MapProcessingStage.IDLE,
     val error: String? = null,
+    val manualBoundaryRequired: Boolean = false,
 ) {
     val isProcessing: Boolean
         get() = stage !in setOf(MapProcessingStage.IDLE, MapProcessingStage.COMPLETE)
@@ -215,6 +216,16 @@ class MapProcessingViewModel internal constructor(
         )
     }
 
+    /** Opens a transferred map as a new unsaved working copy. */
+    fun openImportedMap(imported: SavedMap) {
+        openSavedMap(imported)
+        _uiState.value = _uiState.value.copy(
+            savedMapId = null,
+            savedMapName = imported.name,
+            savedContentDirty = true,
+        )
+    }
+
     fun markSaved(entity: ScannedMapEntity, draft: SavedMapDraft) {
         _uiState.value = _uiState.value.copy(
             savedPixelsPerMeter = entity.pixelsPerMeter,
@@ -245,16 +256,32 @@ class MapProcessingViewModel internal constructor(
         updateStage(MapProcessingStage.RECTIFYING_MAP, source, boundary)
         val rectified = engine.warpPerspective(source, boundary)
         updateStage(MapProcessingStage.DETECTING_CONTROLS, source, boundary, rectified)
-        val symbols = engine.detectControlSymbols(rectified)
+        val symbols = try {
+            engine.detectControlSymbols(rectified)
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (_: Throwable) {
+            // Automatic point detection is optional: keep the rectified map usable so points
+            // can still be added manually on devices where the detector cannot initialize.
+            emptyList()
+        }
         updateStage(MapProcessingStage.RECOGNIZING_CODES, source, boundary, rectified)
 
         val points = symbols.map { symbol ->
             val code = if (symbol.type == ControlPointType.CONTROL) {
-                val roi = engine.cropRegion(rectified, symbol)
                 try {
-                    engine.extractControlNumber(roi) ?: 0
-                } finally {
-                    if (roi !== rectified && !roi.isRecycled) roi.recycle()
+                    val roi = engine.cropRegion(rectified, symbol)
+                    try {
+                        engine.extractControlNumber(roi) ?: 0
+                    } finally {
+                        if (roi !== rectified && !roi.isRecycled) roi.recycle()
+                    }
+                } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                    throw cancellation
+                } catch (_: Throwable) {
+                    // OCR availability varies by device. Keep the detected point editable when
+                    // ML Kit cannot initialize or recognize this individual crop.
+                    0
                 }
             } else {
                 0
@@ -295,9 +322,12 @@ class MapProcessingViewModel internal constructor(
 
     private fun publishFailure(throwable: Throwable) {
         if (throwable is kotlinx.coroutines.CancellationException) return
+        val failedDuringBoundaryDetection =
+            _uiState.value.stage == MapProcessingStage.DETECTING_BOUNDARY
         _uiState.value = _uiState.value.copy(
             stage = MapProcessingStage.IDLE,
             error = throwable.message ?: "Map processing failed",
+            manualBoundaryRequired = failedDuringBoundaryDetection,
         )
     }
 

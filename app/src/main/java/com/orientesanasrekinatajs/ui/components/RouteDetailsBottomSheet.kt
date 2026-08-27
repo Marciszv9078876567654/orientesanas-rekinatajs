@@ -84,7 +84,7 @@ fun RouteDetailsBottomSheet(
                         .padding(horizontal = 3.dp, vertical = 4.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(
-                            routeDetailColor(routeMetadata[candidate.id]?.colorIndex ?: 0)
+                            routeColor(routeMetadata[candidate.id]?.colorIndex ?: 0)
                                 .copy(alpha = if (isSelected) 0.34f else 0.16f),
                         ),
                     text = {
@@ -168,11 +168,6 @@ fun RouteDetailsBottomSheet(
         )
     }
 }
-
-private fun routeDetailColor(index: Int): androidx.compose.ui.graphics.Color = listOf(
-    0xFF455A64, 0xFF3F51B5, 0xFF009688, 0xFFFF9800, 0xFF9C27B0,
-    0xFF03A9F4, 0xFF8BC34A, 0xFFFF5722, 0xFF795548, 0xFF607D8B,
-).let { androidx.compose.ui.graphics.Color(it[index.mod(it.size)]) }
 
 /** Lightweight route-order editor shell. Drag-and-drop behavior will be added separately. */
 @OptIn(ExperimentalMaterial3Api::class)

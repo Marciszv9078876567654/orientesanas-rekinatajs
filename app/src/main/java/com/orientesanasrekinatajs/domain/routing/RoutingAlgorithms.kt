@@ -5,6 +5,7 @@ import com.orientesanasrekinatajs.domain.model.ControlPoint
 /** Deterministic routing heuristics for the application's two route modes. */
 object RoutingAlgorithms {
     private const val DISTANCE_EPSILON = 0.0001f
+    private const val MAX_TWO_OPT_PASSES = 64
 
     /** Visits every supplied control using nearest neighbor, with [finish] fixed at the end. */
     fun nearestNeighbor(
@@ -46,7 +47,7 @@ object RoutingAlgorithms {
         if (path.size < 4) return path.toList()
 
         val optimized = path.toMutableList()
-        while (true) {
+        repeat(MAX_TWO_OPT_PASSES) {
             var bestStart = -1
             var bestEnd = -1
             var bestDelta = -DISTANCE_EPSILON
@@ -71,7 +72,7 @@ object RoutingAlgorithms {
                 }
             }
 
-            if (bestStart < 0) break
+            if (bestStart < 0) return optimized
             optimized.subList(bestStart, bestEnd + 1).reverse()
         }
 
@@ -145,11 +146,10 @@ object RoutingAlgorithms {
             val selected = bestInsertion ?: break
             route.add(selected.edgeIndex + 1, selected.point)
             remaining.removeAll { it.id == selected.point.id }
-            route = twoOpt(route, distanceMatrix).toMutableList()
-            currentDistance = totalDistance(route, distanceMatrix)
+            currentDistance += selected.addedDistance
         }
 
-        return route
+        return twoOpt(route, distanceMatrix)
     }
 
     /**
@@ -206,24 +206,32 @@ object RoutingAlgorithms {
             route.add(selected.edgeIndex + 1, selected.point)
             remaining.removeAll { it.id == selected.point.id }
             collectedScore += selected.point.points
-            route = twoOpt(route, distanceMatrix).toMutableList()
         }
 
         while (true) {
             val removable = route
-                .filter { it.type == com.orientesanasrekinatajs.domain.model.ControlPointType.CONTROL }
-                .filter { collectedScore - it.points >= targetScore }
-                .map { point ->
-                    val candidate = twoOpt(route.filterNot { it.id == point.id }, distanceMatrix)
-                    Triple(point, candidate, totalDistance(candidate, distanceMatrix))
+                .withIndex()
+                .filter { (_, point) ->
+                    point.type == com.orientesanasrekinatajs.domain.model.ControlPointType.CONTROL &&
+                        collectedScore - point.points >= targetScore
                 }
-                .minByOrNull { it.third }
+                .map { (index, point) ->
+                    val distanceSaving = distanceMatrix[route[index - 1], point] +
+                        distanceMatrix[point, route[index + 1]] -
+                        distanceMatrix[route[index - 1], route[index + 1]]
+                    Triple(index, point, distanceSaving)
+                }
+                .maxWithOrNull(
+                    compareBy<Triple<Int, ControlPoint, Float>> { it.third }
+                        .thenBy { it.second.points }
+                        .thenByDescending { it.second.code },
+                )
                 ?: break
-            if (removable.third >= totalDistance(route, distanceMatrix) - DISTANCE_EPSILON) break
-            collectedScore -= removable.first.points
-            route = removable.second.toMutableList()
+            if (removable.third <= DISTANCE_EPSILON) break
+            collectedScore -= removable.second.points
+            route.removeAt(removable.first)
         }
-        return route
+        return twoOpt(route, distanceMatrix)
     }
 
     fun totalDistance(

@@ -4,6 +4,8 @@ import android.app.Activity
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -75,6 +77,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -126,6 +129,7 @@ import androidx.compose.foundation.verticalScroll
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
 import com.orientesanasrekinatajs.data.local.SavedMapDraft
+import com.orientesanasrekinatajs.data.transfer.MapTransferRepository
 import com.orientesanasrekinatajs.domain.model.ControlPoint
 import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.LanguageConfig
@@ -133,6 +137,8 @@ import com.orientesanasrekinatajs.domain.model.MapBoundary
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
+import com.orientesanasrekinatajs.domain.model.RouteRestriction
+import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
 import com.orientesanasrekinatajs.domain.model.ThemeConfig
 import com.orientesanasrekinatajs.domain.model.UserPreferences
 import com.orientesanasrekinatajs.ui.components.DistanceCalibrationCanvas
@@ -143,15 +149,19 @@ import com.orientesanasrekinatajs.ui.components.RouteDetailsBottomSheet
 import com.orientesanasrekinatajs.ui.components.RouteEditorBottomSheet
 import com.orientesanasrekinatajs.ui.components.RouteRenderingCanvas
 import com.orientesanasrekinatajs.ui.components.RouteRenderLayer
+import com.orientesanasrekinatajs.ui.components.routeColor
 import com.orientesanasrekinatajs.ui.processing.MapProcessingStage
 import com.orientesanasrekinatajs.ui.processing.MapProcessingUiState
 import com.orientesanasrekinatajs.ui.routing.RouteMode
 import com.orientesanasrekinatajs.ui.routing.RouteManagementAction
+import com.orientesanasrekinatajs.ui.routing.RouteRestrictionAction
 import com.orientesanasrekinatajs.ui.routing.AlternativeRouteCriteria
 import com.orientesanasrekinatajs.ui.routing.RoutingUiState
 import com.orientesanasrekinatajs.ui.savedmaps.SavedMapsEvent
 import com.orientesanasrekinatajs.ui.savedmaps.SavedMapsUiState
 import com.orientesanasrekinatajs.ui.theme.LocalAnimationsEnabled
+import com.orientesanasrekinatajs.ui.transfer.MapTransferEvent
+import com.orientesanasrekinatajs.ui.transfer.MapTransferUiState
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.hypot
@@ -162,6 +172,7 @@ fun OrienteeringApp(
     routingState: RoutingUiState,
     userPreferences: UserPreferences,
     savedMapsState: SavedMapsUiState,
+    mapTransferState: MapTransferUiState,
     onImageSelected: (Uri) -> Unit,
     onApplyBoundary: (MapBoundary) -> Unit,
     onApplyEditedBoundary: (MapBoundary, Point2D?, Point2D?, Float?) -> Unit,
@@ -178,12 +189,16 @@ fun OrienteeringApp(
     ) -> Unit,
     onGenerateAlternativeRoutes: (List<ControlPoint>, Float, AlternativeRouteCriteria) -> Unit,
     onManageRoutes: (RouteManagementAction) -> Unit,
+    onManageRouteRestrictions: (RouteRestrictionAction) -> Unit,
+    onExportMap: (Uri, SavedMapDraft, Boolean) -> Unit,
+    onImportMap: (Uri) -> Unit,
     onSaveMap: (SavedMapDraft, (ScannedMapEntity) -> Unit) -> Unit,
     onLoadSavedMap: (String) -> Unit,
     onRenameSavedMap: (String, String, (ScannedMapEntity) -> Unit) -> Unit,
     onDeleteSavedMap: (String, () -> Unit) -> Unit,
     onClearAllSavedMaps: () -> Unit,
     onDismissSavedMapsEvent: () -> Unit,
+    onDismissMapTransferEvent: () -> Unit,
     onReset: () -> Unit,
     onUpdateTheme: (ThemeConfig) -> Unit,
     onUpdateLanguage: (LanguageConfig) -> Unit,
@@ -224,7 +239,8 @@ fun OrienteeringApp(
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                 when {
                 processingState.isProcessing -> ProcessingScreen(onBack = onReset)
-                processingState.error != null && processingState.sourceBitmap != null -> ManualBoundaryScreen(
+                processingState.error != null && processingState.manualBoundaryRequired &&
+                    processingState.sourceBitmap != null -> ManualBoundaryScreen(
                     bitmap = processingState.sourceBitmap,
                     error = processingState.error,
                     rotation = mapRotation,
@@ -251,11 +267,14 @@ fun OrienteeringApp(
                     onCalculateRoute = onCalculateRoute,
                     onGenerateAlternativeRoutes = onGenerateAlternativeRoutes,
                     onManageRoutes = onManageRoutes,
+                    onManageRouteRestrictions = onManageRouteRestrictions,
+                    onExportMap = onExportMap,
                     onSaveMap = onSaveMap,
                     onRenameSavedMap = onRenameSavedMap,
                     onDeleteSavedMap = onDeleteSavedMap,
                     onReloadSavedMap = onLoadSavedMap,
                     isSavingMap = savedMapsState.isSaving,
+                    isTransferringMap = mapTransferState.isWorking,
                     rotation = mapRotation,
                     onRotationChange = { mapRotation = it },
                     onBackHome = onReset,
@@ -264,6 +283,7 @@ fun OrienteeringApp(
                     onImageSelected = onImageSelected,
                     onOpenSettings = { showSettings = true },
                     onOpenRecentMaps = { showRecentMaps = true },
+                    onImportMap = onImportMap,
                 )
                 }
             }
@@ -311,6 +331,22 @@ fun OrienteeringApp(
                 },
             ),
             onDismiss = onDismissSavedMapsEvent,
+        )
+    }
+    mapTransferState.event?.let { event ->
+        MessageDialog(
+            title = stringResource(
+                if (event == MapTransferEvent.EXPORTED) R.string.map_exported_title
+                else R.string.map_transfer_error_title,
+            ),
+            message = stringResource(
+                when (event) {
+                    MapTransferEvent.EXPORTED -> R.string.map_exported_message
+                    MapTransferEvent.EXPORT_FAILED -> R.string.map_export_failed
+                    MapTransferEvent.IMPORT_FAILED -> R.string.map_import_failed
+                },
+            ),
+            onDismiss = onDismissMapTransferEvent,
         )
     }
 }
@@ -452,11 +488,14 @@ private fun MapFlowScreen(
     onCalculateRoute: (Float, RouteMode, Float?, Int?) -> Unit,
     onGenerateAlternativeRoutes: (List<ControlPoint>, Float, AlternativeRouteCriteria) -> Unit,
     onManageRoutes: (RouteManagementAction) -> Unit,
+    onManageRouteRestrictions: (RouteRestrictionAction) -> Unit,
+    onExportMap: (Uri, SavedMapDraft, Boolean) -> Unit,
     onSaveMap: (SavedMapDraft, (ScannedMapEntity) -> Unit) -> Unit,
     onRenameSavedMap: (String, String, (ScannedMapEntity) -> Unit) -> Unit,
     onDeleteSavedMap: (String, () -> Unit) -> Unit,
     onReloadSavedMap: (String) -> Unit,
     isSavingMap: Boolean,
+    isTransferringMap: Boolean,
     rotation: Int,
     onRotationChange: (Int) -> Unit,
     onBackHome: () -> Unit,
@@ -465,7 +504,7 @@ private fun MapFlowScreen(
         ?: processingState.rectifiedBitmap?.hashCode()?.toString()
     var page by rememberSaveable(sessionKey) {
         mutableStateOf(
-            if (processingState.savedMapId != null && routingState.route != null) MapPage.ROUTE else MapPage.EDIT,
+            if (routingState.route != null) MapPage.ROUTE else MapPage.EDIT,
         )
     }
     val rectified = requireNotNull(processingState.rectifiedBitmap)
@@ -506,6 +545,69 @@ private fun MapFlowScreen(
     val visiblePage = page
     val animationsEnabled = LocalAnimationsEnabled.current
     val defaultRouteName = stringResource(R.string.route)
+    val createDraft: (
+        selectedRoute: OptimizedRoute?,
+        existingId: String?,
+        name: String?,
+        includeRoutes: Boolean,
+    ) -> SavedMapDraft? = { selectedRoute, existingId, name, includeRoutes ->
+        effectivePixelsPerMeter?.let { scale ->
+            SavedMapDraft(
+                bitmap = rectified,
+                pixelsPerMeter = scale,
+                points = processingState.controlPoints,
+                route = routingState.route.takeIf { includeRoutes },
+                selectedRoute = selectedRoute.takeIf { includeRoutes },
+                alternativeRoutes = routingState.alternativeRoutes.takeIf { includeRoutes }.orEmpty(),
+                routeMetadata = routingState.routeMetadata.takeIf { includeRoutes }.orEmpty(),
+                routeRestrictions = routingState.routeRestrictions.takeIf { includeRoutes }.orEmpty(),
+                routeMode = routingState.mode.name,
+                routeBudgetMeters = routingState.budgetMeters.takeIf { includeRoutes },
+                routeTargetScore = routingState.targetScore.takeIf { includeRoutes },
+                lineStart = lineStart,
+                lineEnd = lineEnd,
+                lineDistanceMeters = lineMeters,
+                rotationQuarterTurns = rotation,
+                existingId = existingId,
+                name = name,
+            )
+        }
+    }
+    var showExportOptions by rememberSaveable { mutableStateOf(false) }
+    var pendingExportIncludesRoutes by rememberSaveable { mutableStateOf(false) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(MapTransferRepository.MIME_TYPE),
+    ) { uri ->
+        uri?.let { destination ->
+            val routes = listOfNotNull(routingState.route) + routingState.alternativeRoutes
+            val selected = routes.firstOrNull { it.id == routingState.selectedRouteId }
+                ?: routingState.route
+            createDraft(
+                selected,
+                null,
+                savedMapName?.takeIf(String::isNotBlank) ?: defaultRouteName,
+                pendingExportIncludesRoutes,
+            )?.let { draft ->
+                onExportMap(destination, draft, pendingExportIncludesRoutes)
+            }
+        }
+    }
+    val requestExport: () -> Unit = { showExportOptions = true }
+    val saveCurrentMap: (OptimizedRoute?, Boolean) -> Unit = { selectedRoute, saveCopy ->
+        val copyName = "${savedMapName?.takeIf(String::isNotBlank) ?: defaultRouteName} - copy"
+        createDraft(
+            selectedRoute,
+            savedMapId.takeUnless { saveCopy },
+            if (saveCopy) copyName else savedMapName,
+            true,
+        )?.let { draft ->
+            onSaveMap(draft) { saved ->
+                savedMapId = saved.id
+                savedMapName = saved.name
+                isDirty = false
+            }
+        }
+    }
 
     Crossfade(
         targetState = visiblePage,
@@ -527,40 +629,12 @@ private fun MapFlowScreen(
             onRotationChange = { isDirty = true; onRotationChange(it) },
             canSave = effectivePixelsPerMeter != null,
             isSaving = isSavingMap,
+            isExporting = isTransferringMap,
             savedMapId = savedMapId,
             savedMapName = savedMapName,
             isDirty = isDirty,
-            onSave = { selectedRoute, saveCopy ->
-                effectivePixelsPerMeter?.let { scale ->
-                    routingState.route?.let { primaryRoute ->
-                    val copyName = "${savedMapName?.takeIf(String::isNotBlank) ?: defaultRouteName} - copy"
-                    onSaveMap(
-                        SavedMapDraft(
-                            bitmap = rectified,
-                            pixelsPerMeter = scale,
-                            points = processingState.controlPoints,
-                            route = primaryRoute,
-                            selectedRoute = selectedRoute,
-                            alternativeRoutes = routingState.alternativeRoutes,
-                            routeMetadata = routingState.routeMetadata,
-                            routeMode = routingState.mode.name,
-                            routeBudgetMeters = routingState.budgetMeters,
-                            routeTargetScore = routingState.targetScore,
-                            lineStart = lineStart,
-                            lineEnd = lineEnd,
-                            lineDistanceMeters = lineMeters,
-                            rotationQuarterTurns = rotation,
-                            existingId = savedMapId.takeUnless { saveCopy },
-                            name = if (saveCopy) copyName else savedMapName,
-                        ),
-                    ) { saved ->
-                        savedMapId = saved.id
-                        savedMapName = saved.name
-                        isDirty = false
-                    }
-                    }
-                }
-            },
+            onSave = saveCurrentMap,
+            onExport = requestExport,
             onRouteSelectionChanged = { isDirty = true },
             onRename = { name ->
                 savedMapId?.let { id ->
@@ -599,9 +673,14 @@ private fun MapFlowScreen(
                 }
             },
             routeMetadata = routingState.routeMetadata,
+            routeRestrictions = routingState.routeRestrictions,
             onManageRoutes = { action ->
                 isDirty = true
                 onManageRoutes(action)
+            },
+            onManageRouteRestrictions = { action ->
+                isDirty = true
+                onManageRouteRestrictions(action)
             },
         )
     } else {
@@ -646,6 +725,13 @@ private fun MapFlowScreen(
                 editOpenedFromRoute = false
                 page = MapPage.ROUTE
             },
+            canSave = effectivePixelsPerMeter != null,
+            isSaving = isSavingMap,
+            isExporting = isTransferringMap,
+            isDirty = isDirty,
+            savedMapId = savedMapId,
+            onSave = { saveCopy -> saveCurrentMap(routingState.route, saveCopy) },
+            onExport = requestExport,
             lineStart = lineStart,
             lineEnd = lineEnd,
             lineDistanceText = lineDistanceText,
@@ -696,6 +782,71 @@ private fun MapFlowScreen(
         )
     }
     }
+    if (showExportOptions) {
+        ExportMapDialog(
+            hasRoutes = routingState.route != null || routingState.alternativeRoutes.isNotEmpty(),
+            isExporting = isTransferringMap,
+            onExport = { includeRoutes ->
+                pendingExportIncludesRoutes = includeRoutes
+                showExportOptions = false
+                val baseName = (savedMapName?.takeIf(String::isNotBlank) ?: defaultRouteName)
+                    .replace(Regex("[^A-Za-z0-9._ -]"), "_")
+                    .trim()
+                    .ifBlank { "map" }
+                exportLauncher.launch("$baseName.${MapTransferRepository.FILE_EXTENSION}")
+            },
+            onDismiss = { showExportOptions = false },
+        )
+    }
+}
+
+@Composable
+private fun ExportMapDialog(
+    hasRoutes: Boolean,
+    isExporting: Boolean,
+    onExport: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var includeRoutes by rememberSaveable(hasRoutes) { mutableStateOf(hasRoutes) }
+    AlertDialog(
+        onDismissRequest = { if (!isExporting) onDismiss() },
+        title = { CenteredDialogTitle(stringResource(R.string.export_map)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.export_map_help))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(stringResource(R.string.include_all_routes), modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = includeRoutes,
+                        onCheckedChange = { includeRoutes = it },
+                        enabled = hasRoutes && !isExporting,
+                    )
+                }
+                Text(
+                    stringResource(
+                        if (includeRoutes && hasRoutes) R.string.export_map_and_routes_description
+                        else R.string.export_map_only_description,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onExport(includeRoutes && hasRoutes) }, enabled = !isExporting) {
+                Text(stringResource(R.string.export))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isExporting) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -709,6 +860,13 @@ private fun EditMapScreen(
     onRemoveControlPoint: (String) -> Unit,
     onClearControlPoints: () -> Unit,
     onOpenRoute: () -> Unit,
+    canSave: Boolean,
+    isSaving: Boolean,
+    isExporting: Boolean,
+    isDirty: Boolean,
+    savedMapId: String?,
+    onSave: (Boolean) -> Unit,
+    onExport: () -> Unit,
     lineStart: Point2D?,
     lineEnd: Point2D?,
     lineDistanceText: String,
@@ -734,6 +892,8 @@ private fun EditMapScreen(
     var confirmLeaveEdit by rememberSaveable { mutableStateOf(false) }
     var confirmDiscardPointChanges by rememberSaveable { mutableStateOf(false) }
     var confirmDiscardCornerChanges by rememberSaveable { mutableStateOf(false) }
+    var showSaveConfirmation by rememberSaveable { mutableStateOf(false) }
+    var pendingBackAfterSave by rememberSaveable { mutableStateOf(false) }
     var viewportCenterPoint by remember(rectified) {
         mutableStateOf(Point2D(rectified.width / 2f, rectified.height / 2f))
     }
@@ -801,10 +961,25 @@ private fun EditMapScreen(
         when (editMode) {
             EditMode.POINTS -> requestDiscardPointChanges()
             EditMode.CORNERS -> requestDiscardCornerChanges()
-            EditMode.CALIBRATION -> confirmLeaveEdit = true
+            EditMode.CALIBRATION -> when {
+                isSaving -> pendingBackAfterSave = true
+                isDirty -> confirmLeaveEdit = true
+                else -> onBack()
+            }
         }
     }
     BackHandler(onBack = requestBack)
+    LaunchedEffect(isSaving, isDirty, pendingBackAfterSave) {
+        if (!isSaving && pendingBackAfterSave) {
+            pendingBackAfterSave = false
+            if (isDirty) {
+                confirmLeaveEdit = true
+            } else {
+                confirmLeaveEdit = false
+                onBack()
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenTopBar(
@@ -816,17 +991,29 @@ private fun EditMapScreen(
                 },
             ),
             onBack = requestBack,
-            action = if (editMode == EditMode.POINTS && visiblePoints.isNotEmpty()) {
-                {
+            action = when {
+                editMode == EditMode.POINTS && visiblePoints.isNotEmpty() -> ({
                     IconButton(onClick = { confirmPointsClear = true }) {
                         Icon(
                             Icons.Default.DeleteForever,
                             contentDescription = stringResource(R.string.clear_points),
                         )
                     }
-                }
-            } else {
-                null
+                })
+                editMode == EditMode.CALIBRATION -> ({
+                    Row {
+                        IconButton(onClick = onExport, enabled = canSave && !isExporting) {
+                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.export_map))
+                        }
+                        IconButton(
+                            onClick = { showSaveConfirmation = true },
+                            enabled = canSave && !isSaving,
+                        ) {
+                            Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_map))
+                        }
+                    }
+                })
+                else -> null
             },
         )
         Column(
@@ -880,8 +1067,8 @@ private fun EditMapScreen(
                     Surface(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp).size(56.dp),
                         shape = CircleShape,
-                        color = Color.White,
-                        contentColor = Color.Black,
+                        color = MaterialTheme.colorScheme.inverseSurface,
+                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
                         tonalElevation = 5.dp,
                     ) {
                         IconButton(
@@ -956,7 +1143,12 @@ private fun EditMapScreen(
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Default.CropFree, contentDescription = null)
-                            Text(stringResource(R.string.edit_corners), modifier = Modifier.padding(start = 6.dp))
+                            Text(
+                                stringResource(R.string.edit_corners),
+                                modifier = Modifier.padding(start = 6.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                         OutlinedButton(
                             onClick = {
@@ -968,7 +1160,12 @@ private fun EditMapScreen(
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Default.Edit, contentDescription = null)
-                            Text(stringResource(R.string.edit_points), modifier = Modifier.padding(start = 6.dp))
+                            Text(
+                                stringResource(R.string.edit_points),
+                                modifier = Modifier.padding(start = 6.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                     Row(
@@ -1067,6 +1264,35 @@ private fun EditMapScreen(
                 discardCornerChanges()
             },
             onDismiss = { confirmDiscardCornerChanges = false },
+        )
+    }
+    if (showSaveConfirmation) {
+        AlertDialog(
+            onDismissRequest = { if (!isSaving) showSaveConfirmation = false },
+            title = { CenteredDialogTitle(stringResource(R.string.save_map_confirmation_title)) },
+            text = { Text(stringResource(R.string.save_map_confirmation_message)) },
+            confirmButton = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (savedMapId != null) {
+                        TextButton(
+                            onClick = { showSaveConfirmation = false; onSave(true) },
+                            enabled = !isSaving,
+                        ) { Text(stringResource(R.string.save_copy)) }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(
+                        onClick = { showSaveConfirmation = false },
+                        enabled = !isSaving,
+                    ) { Text(stringResource(R.string.cancel)) }
+                    TextButton(
+                        onClick = { showSaveConfirmation = false; onSave(false) },
+                        enabled = !isSaving,
+                    ) { Text(stringResource(R.string.save)) }
+                }
+            },
         )
     }
 
@@ -1264,10 +1490,12 @@ private fun RouteScreen(
     onRotationChange: (Int) -> Unit,
     canSave: Boolean,
     isSaving: Boolean,
+    isExporting: Boolean,
     savedMapId: String?,
     savedMapName: String?,
     isDirty: Boolean,
-    onSave: (OptimizedRoute, Boolean) -> Unit,
+    onSave: (OptimizedRoute?, Boolean) -> Unit,
+    onExport: () -> Unit,
     onRouteSelectionChanged: () -> Unit,
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
@@ -1285,7 +1513,9 @@ private fun RouteScreen(
     isGeneratingAlternatives: Boolean,
     onGenerateAlternatives: (AlternativeRouteCriteria) -> Unit,
     routeMetadata: Map<String, RouteMetadata>,
+    routeRestrictions: List<RouteRestriction>,
     onManageRoutes: (RouteManagementAction) -> Unit,
+    onManageRouteRestrictions: (RouteRestrictionAction) -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
@@ -1315,6 +1545,7 @@ private fun RouteScreen(
     var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
     var showSaveConfirmation by rememberSaveable { mutableStateOf(false) }
     var showUnsavedHomeConfirmation by rememberSaveable { mutableStateOf(false) }
+    var pendingHomeAfterSave by rememberSaveable { mutableStateOf(false) }
     var showRouteMenu by rememberSaveable { mutableStateOf(false) }
     var showRouteEditor by rememberSaveable { mutableStateOf(false) }
     var showRouteRestrictions by rememberSaveable { mutableStateOf(false) }
@@ -1369,13 +1600,27 @@ private fun RouteScreen(
             showRouteGenerator = false
         }
     }
+    LaunchedEffect(isSaving, isDirty, pendingHomeAfterSave) {
+        if (!isSaving && !isDirty) {
+            showUnsavedHomeConfirmation = false
+            if (pendingHomeAfterSave) {
+                pendingHomeAfterSave = false
+                onHome()
+            }
+        } else if (!isSaving && pendingHomeAfterSave) {
+            pendingHomeAfterSave = false
+            showUnsavedHomeConfirmation = true
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
             Box(Modifier.fillMaxWidth().height(48.dp)) {
                 IconButton(
                     onClick = {
-                        if (isDirty || savedMapId == null) {
+                        if (isSaving) {
+                            pendingHomeAfterSave = true
+                        } else if (isDirty || savedMapId == null) {
                             showUnsavedHomeConfirmation = true
                         } else {
                             onHome()
@@ -1386,10 +1631,24 @@ private fun RouteScreen(
                     Icon(Icons.Default.Home, contentDescription = stringResource(R.string.home))
                 }
                 Row(
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = if (savedMapId != null && !isDirty) 96.dp else 48.dp,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalArrangement = Arrangement.Center,
                 ) {
+                    if (savedMapId != null) {
+                        IconButton(onClick = { showRename = true }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Default.DriveFileRenameOutline,
+                                contentDescription = stringResource(R.string.rename_route),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                     Text(
                         text = when {
                             savedMapId != null && isDirty -> stringResource(
@@ -1401,23 +1660,15 @@ private fun RouteScreen(
                         },
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1,
+                        softWrap = false,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 184.dp),
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (savedMapId != null) {
-                        IconButton(onClick = { showRename = true }, modifier = Modifier.size(32.dp)) {
-                            Icon(
-                                Icons.Default.DriveFileRenameOutline,
-                                contentDescription = stringResource(R.string.rename_route),
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
                 }
                 Row(Modifier.align(Alignment.CenterEnd)) {
                     IconButton(
                         onClick = { showSaveConfirmation = true },
-                        enabled = canSave && !isSaving && displayedRoute != null,
+                        enabled = canSave && !isSaving,
                     ) {
                         Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_map))
                     }
@@ -1581,9 +1832,10 @@ private fun RouteScreen(
                                     )
                                     HorizontalDivider()
                                     DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.export_route)) },
+                                        text = { Text(stringResource(R.string.export_map)) },
                                         leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
-                                        onClick = { showRouteMenu = false },
+                                        enabled = canSave && !isExporting,
+                                        onClick = { showRouteMenu = false; onExport() },
                                     )
                                 }
                             }
@@ -1629,31 +1881,11 @@ private fun RouteScreen(
         )
     }
     if (showRouteRestrictions) {
-        AlertDialog(
-            onDismissRequest = { showRouteRestrictions = false },
-            title = { CenteredDialogTitle(stringResource(R.string.route_restrictions)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.route_restrictions_placeholder))
-                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.blacklist_control))
-                    }
-                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.blacklist_connection))
-                    }
-                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.mandatory_control))
-                    }
-                    OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.mandatory_connection))
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showRouteRestrictions = false }) {
-                    Text(stringResource(R.string.close))
-                }
-            },
+        RouteRestrictionsDialog(
+            points = allPoints,
+            restrictions = routeRestrictions,
+            onAction = onManageRouteRestrictions,
+            onDismiss = { showRouteRestrictions = false },
         )
     }
     if (showAlternativeRoutes && route != null && availableRoutes.any {
@@ -1757,7 +1989,7 @@ private fun RouteScreen(
             onDismiss = { showUnsavedHomeConfirmation = false },
         )
     }
-    if (showSaveConfirmation && displayedRoute != null) {
+    if (showSaveConfirmation) {
         AlertDialog(
             onDismissRequest = { if (!isSaving) showSaveConfirmation = false },
             title = { CenteredDialogTitle(stringResource(R.string.save_map_confirmation_title)) },
@@ -1767,13 +1999,15 @@ private fun RouteScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(
-                        onClick = {
-                            showSaveConfirmation = false
-                            onSave(displayedRoute, true)
-                        },
-                        enabled = !isSaving,
-                    ) { Text(stringResource(R.string.save_copy)) }
+                    if (savedMapId != null) {
+                        TextButton(
+                            onClick = {
+                                showSaveConfirmation = false
+                                onSave(displayedRoute, true)
+                            },
+                            enabled = !isSaving,
+                        ) { Text(stringResource(R.string.save_copy)) }
+                    }
                     Spacer(Modifier.weight(1f))
                     TextButton(
                         onClick = { showSaveConfirmation = false },
@@ -2278,10 +2512,277 @@ private fun managedRouteDefaultName(
     }
 }
 
-private fun routeColor(index: Int): Color = listOf(
-    0xFF455A64, 0xFF3F51B5, 0xFF009688, 0xFFFF9800, 0xFF9C27B0,
-    0xFF03A9F4, 0xFF8BC34A, 0xFFFF5722, 0xFF795548, 0xFF607D8B,
-).let { Color(it[index.mod(it.size)]) }
+@Composable
+private fun RouteRestrictionsDialog(
+    points: List<ControlPoint>,
+    restrictions: List<RouteRestriction>,
+    onAction: (RouteRestrictionAction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var showAddRestriction by rememberSaveable { mutableStateOf(false) }
+    var pendingDeleteRestrictionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmDeleteAllUnstarred by rememberSaveable { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { CenteredDialogTitle(stringResource(R.string.route_restrictions)) },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.route_restrictions_help),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (restrictions.isEmpty()) {
+                    Text(
+                        stringResource(R.string.no_route_restrictions),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                restrictions.forEach { restriction ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                restrictionDescription(restriction, points),
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            IconButton(
+                                onClick = { onAction(RouteRestrictionAction.ToggleStar(restriction.id)) },
+                            ) {
+                                Icon(
+                                    if (restriction.isStarred) Icons.Default.Star else Icons.Default.StarBorder,
+                                    contentDescription = stringResource(
+                                        if (restriction.isStarred) R.string.unstar_rule else R.string.star_rule,
+                                    ),
+                                )
+                            }
+                            IconButton(
+                                onClick = { pendingDeleteRestrictionId = restriction.id },
+                                enabled = !restriction.isStarred,
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.delete_rule))
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(
+                    onClick = { showAddRestriction = true },
+                    enabled = points.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.add_restriction))
+                }
+                OutlinedButton(
+                    onClick = { confirmDeleteAllUnstarred = true },
+                    enabled = restrictions.any { !it.isStarred },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null)
+                    Text(
+                        stringResource(R.string.delete_all_unstarred_rules),
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) }
+        },
+    )
+    if (showAddRestriction) {
+        AddRouteRestrictionDialog(
+            points = points,
+            onAdd = { restriction ->
+                onAction(RouteRestrictionAction.Add(restriction))
+                showAddRestriction = false
+            },
+            onDismiss = { showAddRestriction = false },
+        )
+    }
+    if (pendingDeleteRestrictionId != null) {
+        ConfirmationDialog(
+            title = stringResource(R.string.delete_route_restriction_title),
+            message = stringResource(R.string.delete_route_restriction_confirmation),
+            onConfirm = {
+                pendingDeleteRestrictionId?.let { id ->
+                    onAction(RouteRestrictionAction.Delete(id))
+                }
+                pendingDeleteRestrictionId = null
+            },
+            onDismiss = { pendingDeleteRestrictionId = null },
+        )
+    }
+    if (confirmDeleteAllUnstarred) {
+        ConfirmationDialog(
+            title = stringResource(R.string.delete_all_route_restrictions_title),
+            message = stringResource(R.string.delete_all_route_restrictions_confirmation),
+            onConfirm = {
+                onAction(RouteRestrictionAction.DeleteAllUnstarred)
+                confirmDeleteAllUnstarred = false
+            },
+            onDismiss = { confirmDeleteAllUnstarred = false },
+        )
+    }
+}
+
+@Composable
+private fun AddRouteRestrictionDialog(
+    points: List<ControlPoint>,
+    onAdd: (RouteRestriction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var type by rememberSaveable { mutableStateOf(RouteRestrictionType.BLACKLIST_CONTROL) }
+    var typeMenuExpanded by remember { mutableStateOf(false) }
+    val eligiblePoints = if (type in setOf(
+            RouteRestrictionType.BLACKLIST_CONTROL,
+            RouteRestrictionType.MANDATORY_CONTROL,
+        )
+    ) points.filter { it.type == ControlPointType.CONTROL } else points
+    var firstPointId by rememberSaveable(type) { mutableStateOf(eligiblePoints.firstOrNull()?.id.orEmpty()) }
+    var secondPointId by rememberSaveable(type) {
+        mutableStateOf(eligiblePoints.firstOrNull { it.id != firstPointId }?.id.orEmpty())
+    }
+    val needsSecondPoint = type in setOf(
+        RouteRestrictionType.BLACKLIST_CONNECTION,
+        RouteRestrictionType.MANDATORY_CONNECTION,
+    )
+    val valid = firstPointId.isNotBlank() && (!needsSecondPoint ||
+        secondPointId.isNotBlank() && secondPointId != firstPointId)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { CenteredDialogTitle(stringResource(R.string.add_restriction)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { typeMenuExpanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(type.labelResource()), modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = typeMenuExpanded,
+                        onDismissRequest = { typeMenuExpanded = false },
+                    ) {
+                        RouteRestrictionType.entries.forEach { candidate ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(candidate.labelResource())) },
+                                onClick = { type = candidate; typeMenuExpanded = false },
+                            )
+                        }
+                    }
+                }
+                RestrictionPointDropdown(
+                    label = stringResource(R.string.first_point),
+                    points = eligiblePoints,
+                    selectedPointId = firstPointId,
+                    onSelected = { selected ->
+                        firstPointId = selected
+                        if (selected == secondPointId) {
+                            secondPointId = eligiblePoints.firstOrNull { it.id != selected }?.id.orEmpty()
+                        }
+                    },
+                )
+                if (needsSecondPoint) {
+                    RestrictionPointDropdown(
+                        label = stringResource(R.string.second_point),
+                        points = eligiblePoints.filterNot { it.id == firstPointId },
+                        selectedPointId = secondPointId,
+                        onSelected = { secondPointId = it },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onAdd(
+                        RouteRestriction(
+                            type = type,
+                            firstPointId = firstPointId,
+                            secondPointId = secondPointId.takeIf { needsSecondPoint },
+                        ),
+                    )
+                },
+                enabled = valid,
+            ) { Text(stringResource(R.string.add)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
+    )
+}
+
+@Composable
+private fun RestrictionPointDropdown(
+    label: String,
+    points: List<ControlPoint>,
+    selectedPointId: String,
+    onSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = points.firstOrNull { it.id == selectedPointId }
+    Column {
+        Text(label, style = MaterialTheme.typography.labelSmall)
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                enabled = points.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(selected?.let(::restrictionPointLabel).orEmpty(), modifier = Modifier.weight(1f))
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                points.forEach { point ->
+                    DropdownMenuItem(
+                        text = { Text(restrictionPointLabel(point)) },
+                        onClick = { onSelected(point.id); expanded = false },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun restrictionDescription(
+    restriction: RouteRestriction,
+    points: List<ControlPoint>,
+): String {
+    val byId = points.associateBy(ControlPoint::id)
+    val first = byId[restriction.firstPointId]?.let(::restrictionPointLabel) ?: "?"
+    val second = restriction.secondPointId?.let { byId[it]?.let(::restrictionPointLabel) ?: "?" }
+    return "${stringResource(restriction.type.labelResource())}: " +
+        listOfNotNull(first, second).joinToString(" – ")
+}
+
+private fun restrictionPointLabel(point: ControlPoint): String = when (point.type) {
+    ControlPointType.START -> "S"
+    ControlPointType.FINISH -> "F"
+    ControlPointType.START_FINISH -> "S/F"
+    ControlPointType.CONTROL -> point.code.toString()
+}
+
+private fun RouteRestrictionType.labelResource(): Int = when (this) {
+    RouteRestrictionType.BLACKLIST_CONTROL -> R.string.blacklist_control
+    RouteRestrictionType.BLACKLIST_CONNECTION -> R.string.blacklist_connection
+    RouteRestrictionType.MANDATORY_CONTROL -> R.string.mandatory_control
+    RouteRestrictionType.MANDATORY_CONNECTION -> R.string.mandatory_connection
+}
 
 @Composable
 private fun AlternativeRoutesDialog(
@@ -2303,6 +2804,8 @@ private fun AlternativeRoutesDialog(
     }
     var sourceMenuExpanded by remember { mutableStateOf(false) }
     val sourceRoute = selectableRoutes.firstOrNull { it.id == sourceRouteId } ?: selectableRoutes.first()
+    val maximumSplitIndex = (sourceRoute.path.lastIndex - 1).coerceAtLeast(0)
+    var splitAfterIndex by rememberSaveable(sourceRoute.id) { mutableIntStateOf(0) }
     var countText by rememberSaveable { mutableStateOf("3") }
     var minDistanceText by rememberSaveable { mutableStateOf("") }
     var maxDistanceText by rememberSaveable { mutableStateOf("") }
@@ -2429,6 +2932,25 @@ private fun AlternativeRoutesDialog(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Text(
+                    stringResource(
+                        R.string.generate_alternatives_after_point,
+                        restrictionPointLabel(sourceRoute.path[splitAfterIndex]),
+                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Slider(
+                    value = splitAfterIndex.toFloat(),
+                    onValueChange = { splitAfterIndex = it.toInt().coerceIn(0, maximumSplitIndex) },
+                    valueRange = 0f..maximumSplitIndex.coerceAtLeast(1).toFloat(),
+                    steps = (maximumSplitIndex - 1).coerceAtLeast(0),
+                    enabled = !isGenerating && maximumSplitIndex > 0,
+                )
+                Text(
+                    stringResource(R.string.alternative_route_prefix_help),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 HorizontalDivider()
                 OutlinedTextField(
                     value = countText,
@@ -2540,6 +3062,7 @@ private fun AlternativeRoutesDialog(
                             minScore = minScore,
                             maxScore = maxScore,
                             useRelativeValues = useRelativeValues,
+                            fixedPrefixPointCount = splitAfterIndex + 1,
                         ),
                     )
                 },

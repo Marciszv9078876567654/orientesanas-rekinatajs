@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -136,7 +137,7 @@ fun InteractiveCornerCanvas(
                                                 viewport.toImage(change.position),
                                             ),
                                         )
-                                    } else if (zoom > 1f) {
+                                    } else {
                                         pan += change.position - change.previousPosition
                                     }
                                     change.consume()
@@ -174,6 +175,7 @@ data class RouteRenderLayer(
     val points: List<ControlPoint>,
     val color: Color,
     val isActive: Boolean,
+    val isPinned: Boolean = !isActive,
 )
 
 @Composable
@@ -189,8 +191,9 @@ fun RouteRenderingCanvas(
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val animationsEnabled = LocalAnimationsEnabled.current
     val effectiveLayers = routeLayers ?: run {
-        listOf(RouteRenderLayer("active", route, Color(0xFF455A64), true))
+        listOf(RouteRenderLayer("active", route, Color(0xFF1565C0), true))
     }
+    val pinnedLayers = effectiveLayers.filter(RouteRenderLayer::isPinned).asReversed()
     val activeRoute = effectiveLayers.firstOrNull(RouteRenderLayer::isActive)?.points ?: route
     val routeKey = activeRoute.joinToString(separator = ":") { it.id }
     val progress = remember { Animatable(if (animationsEnabled) 0f else 1f) }
@@ -257,17 +260,29 @@ fun RouteRenderingCanvas(
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
-            effectiveLayers.filterNot(RouteRenderLayer::isActive).forEach { layer ->
-                val centers = layer.points.map { viewport.base.toCanvas(it.center) }
-                drawRouteLines(centers, 1f, layer.color.copy(alpha = 0.62f))
-            }
             effectiveLayers.filter(RouteRenderLayer::isActive).forEach { layer ->
                 val centers = layer.points.map { viewport.base.toCanvas(it.center) }
                 drawRouteLines(centers, progress.value, layer.color)
             }
+            pinnedLayers.forEach { layer ->
+                val centers = layer.points.map { viewport.base.toCanvas(it.center) }
+                drawRouteLines(
+                    points = centers,
+                    progress = 1f,
+                    color = layer.color.copy(alpha = 0.88f),
+                    dashed = true,
+                    strokeWidth = 5f,
+                )
+            }
         }
         val visitedIds = effectiveLayers.flatMap(RouteRenderLayer::points).mapTo(mutableSetOf()) { it.id }
         val activeLayer = effectiveLayers.firstOrNull(RouteRenderLayer::isActive)
+        val pointColors = buildMap {
+            activeLayer?.points?.forEach { put(it.id, activeLayer.color) }
+            pinnedLayers.forEach { layer ->
+                layer.points.forEach { put(it.id, layer.color) }
+            }
+        }
         drawReferencePoints(
             points = allPoints,
             viewport = viewport,
@@ -276,8 +291,7 @@ fun RouteRenderingCanvas(
             mutedPointIds = allPoints.mapNotNullTo(mutableSetOf()) { point ->
                 point.id.takeUnless(visitedIds::contains)
             },
-            highlightedPointIds = activeLayer?.points?.mapTo(mutableSetOf()) { it.id }.orEmpty(),
-            highlightColor = activeLayer?.color,
+            highlightedPointColors = pointColors,
         )
     }
 }
@@ -380,7 +394,7 @@ fun DistanceCalibrationCanvas(
                                         } else {
                                             latestOnLineChange(latestStart, point)
                                         }
-                                    } else if (zoom > 1f && (latestEnd != null || moved > TAP_SLOP_PX)) {
+                                    } else if (latestEnd != null || moved > TAP_SLOP_PX) {
                                         pan += delta
                                     }
                                     change.consume()
@@ -531,7 +545,7 @@ fun InteractiveControlPointCanvas(
                                             rotationQuarterTurns, zoom, pan,
                                         )
                                         latestOnPointMoved(selected.copy(center = viewport.toImage(change.position)))
-                                    } else if (zoom > 1f) {
+                                    } else {
                                         pan += delta
                                     }
                                     change.consume()
@@ -585,6 +599,8 @@ private fun DrawScope.drawRouteLines(
     points: List<Offset>,
     progress: Float,
     color: Color,
+    dashed: Boolean = false,
+    strokeWidth: Float = 7f,
 ) {
     if (points.size < 2 || progress <= 0f) return
     val lengths = points.zipWithNext { first, second ->
@@ -599,8 +615,9 @@ private fun DrawScope.drawRouteLines(
             color = color,
             start = start,
             end = start + (end - start) * fraction,
-            strokeWidth = 7f,
+            strokeWidth = strokeWidth,
             cap = StrokeCap.Round,
+            pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(18f, 12f)) else null,
         )
         remaining -= length
     }
@@ -612,8 +629,7 @@ private fun DrawScope.drawReferencePoints(
     zoom: Float,
     useTypeColors: Boolean,
     mutedPointIds: Set<String> = emptySet(),
-    highlightedPointIds: Set<String> = emptySet(),
-    highlightColor: Color? = null,
+    highlightedPointColors: Map<String, Color> = emptyMap(),
 ) {
     val pointScale = sqrt(zoom).coerceAtMost(2.4f)
     val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -633,9 +649,9 @@ private fun DrawScope.drawReferencePoints(
         val center = viewport.toCanvas(point.center)
         val markerColor = if (
             !isMuted && point.type == ControlPointType.CONTROL &&
-            point.id in highlightedPointIds && highlightColor != null
+            highlightedPointColors[point.id] != null
         ) {
-            highlightColor
+            requireNotNull(highlightedPointColors[point.id])
         } else if (isMuted) {
             Color(0xFF7A7A7A)
         } else if (useTypeColors) {
@@ -867,8 +883,7 @@ internal fun updatedViewportForGesture(
     val previousCentroid = centroid - panChange
     val focalPan = centroid - viewportCenter -
         (previousCentroid - viewportCenter - currentPan) * zoomRatio
-    val updatedPan = if (updatedZoom == 1f) Offset.Zero else focalPan
-    return updatedZoom to updatedPan
+    return updatedZoom to focalPan
 }
 
 private fun fittedImageTransform(

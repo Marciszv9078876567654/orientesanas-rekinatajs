@@ -12,6 +12,8 @@ import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
+import com.orientesanasrekinatajs.domain.model.RouteRestriction
+import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -111,6 +113,13 @@ class MapDaoTest {
                         order = 0,
                     ),
                 ),
+                routeRestrictions = listOf(
+                    RouteRestriction(
+                        type = RouteRestrictionType.MANDATORY_CONTROL,
+                        firstPointId = point.id,
+                        isStarred = true,
+                    ),
+                ),
                 lineStart = Point2D(1f, 2f),
                 lineEnd = Point2D(11f, 2f),
                 lineDistanceMeters = 4f,
@@ -122,6 +131,7 @@ class MapDaoTest {
         )
         val stored = repository.maps.first().single()
         val reopened = repository.load(stored.id)
+        val reopenedRoute = requireNotNull(reopened.route)
 
         assertEquals(24, reopened.bitmap.width)
         assertEquals(16, reopened.bitmap.height)
@@ -133,14 +143,20 @@ class MapDaoTest {
         assertEquals(Point2D(11f, 2f), reopened.lineEnd)
         assertEquals(4f, reopened.lineDistanceMeters)
         assertEquals(1, reopened.rotationQuarterTurns)
-        assertEquals(3, reopened.route.path.size)
+        assertEquals(3, reopenedRoute.path.size)
         assertEquals(1, reopened.alternativeRoutes.size)
         assertEquals(2, reopened.alternativeRoutes.single().path.size)
         assertEquals("Direct", reopened.routeMetadata.values.single().name)
         assertTrue(reopened.routeMetadata.values.single().isStarred)
         assertTrue(reopened.routeMetadata.values.single().isDisplayed)
         assertEquals(0, reopened.routeMetadata.values.single().order)
-        assertEquals(reopened.route.path.map(ControlPoint::id), reopened.selectedRoutePointIds)
+        assertEquals(RouteRestrictionType.MANDATORY_CONTROL, reopened.routeRestrictions.single().type)
+        assertEquals(
+            reopened.points.single { it.type == ControlPointType.CONTROL }.id,
+            reopened.routeRestrictions.single().firstPointId,
+        )
+        assertTrue(reopened.routeRestrictions.single().isStarred)
+        assertEquals(reopenedRoute.path.map(ControlPoint::id), reopened.selectedRoutePointIds)
         assertEquals("TARGET_SCORE", reopened.routeMode)
         assertEquals(12, reopened.routeTargetScore)
 
@@ -148,6 +164,33 @@ class MapDaoTest {
         repository.clearAll()
         assertEquals(emptyList<ScannedMapEntity>(), repository.maps.first())
         assertTrue(!File(stored.imageFilePath).exists())
+    }
+
+    @Test
+    fun repositorySavesAndReopensMapWithoutRoutes() = runBlocking {
+        val repository = SavedMapRepository(mapsDirectory, database.mapDao())
+        val bitmap = Bitmap.createBitmap(24, 16, Bitmap.Config.ARGB_8888)
+
+        val stored = repository.save(
+            SavedMapDraft(
+                bitmap = bitmap,
+                pixelsPerMeter = 2.5f,
+                points = emptyList(),
+                lineStart = Point2D(1f, 2f),
+                lineEnd = Point2D(11f, 2f),
+                lineDistanceMeters = 4f,
+                rotationQuarterTurns = 0,
+                name = "Empty map",
+            ),
+        )
+        val reopened = repository.load(stored.id)
+
+        assertEquals("Empty map", reopened.name)
+        assertTrue(reopened.points.isEmpty())
+        assertNull(reopened.route)
+        assertTrue(reopened.alternativeRoutes.isEmpty())
+        assertNull(reopened.selectedRouteId)
+        assertTrue(reopened.selectedRoutePointIds.isEmpty())
     }
 
     @Test

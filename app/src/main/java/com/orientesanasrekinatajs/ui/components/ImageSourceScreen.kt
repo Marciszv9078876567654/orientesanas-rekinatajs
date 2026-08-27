@@ -54,7 +54,7 @@ fun ImageSourceScreen(
     onImageSelected: (Uri) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenRecentMaps: () -> Unit = {},
-    onImportRoute: () -> Unit = {},
+    onImportMap: (Uri) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -72,6 +72,9 @@ fun ImageSourceScreen(
         pendingCameraUri = null
         if (saved && uri != null) onImageSelected(uri)
     }
+    val mapImporter = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(onImportMap) }
 
     Surface(modifier = modifier) {
         Box(Modifier.fillMaxSize()) {
@@ -162,14 +165,14 @@ fun ImageSourceScreen(
                         Text(stringResource(R.string.recent_maps))
                     }
                     OutlinedButton(
-                        onClick = onImportRoute,
+                        onClick = { mapImporter.launch(arrayOf("application/zip", "application/octet-stream")) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("importRouteButton"),
                     ) {
                         Icon(Icons.Default.FileDownload, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.import_route))
+                        Text(stringResource(R.string.import_map))
                     }
                 }
             }

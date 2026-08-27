@@ -2,6 +2,7 @@ package com.orientesanasrekinatajs.ui
 
 import android.graphics.Bitmap
 import android.net.Uri
+import com.orientesanasrekinatajs.data.local.SavedMap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.orientesanasrekinatajs.domain.model.ControlPoint
@@ -16,6 +17,10 @@ import com.orientesanasrekinatajs.ui.routing.RouteMode
 import com.orientesanasrekinatajs.ui.routing.RouteManagementAction
 import com.orientesanasrekinatajs.ui.routing.RoutingViewModel
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
+import com.orientesanasrekinatajs.domain.model.RouteRestriction
+import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
+import com.orientesanasrekinatajs.ui.routing.AlternativeRouteCriteria
+import com.orientesanasrekinatajs.ui.routing.RouteRestrictionAction
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -53,6 +58,38 @@ class Phase8ViewModelTest {
 
         assertEquals(MapProcessingStage.IDLE, viewModel.uiState.value.stage)
         assertTrue(viewModel.uiState.value.error.orEmpty().contains("boundary"))
+        assertTrue(viewModel.uiState.value.manualBoundaryRequired)
+    }
+
+    @Test
+    fun mapProcessing_keepsDetectedPointWhenOcrFailsOnDevice() {
+        val viewModel = MapProcessingViewModel(
+            FakeProcessingEngine(ocrFailure = NullPointerException("ML Kit unavailable")),
+            Dispatchers.Unconfined,
+        )
+
+        onMainThread { viewModel.processImage(Uri.parse("content://test/ocr-failure")) }
+
+        val state = viewModel.uiState.value
+        assertEquals(MapProcessingStage.COMPLETE, state.stage)
+        assertEquals(null, state.error)
+        assertTrue(!state.manualBoundaryRequired)
+        assertEquals(0, state.controlPoints.single { it.type == ControlPointType.CONTROL }.code)
+    }
+
+    @Test
+    fun mapProcessing_keepsMapEditableWhenAutomaticPointDetectionFails() {
+        val viewModel = MapProcessingViewModel(
+            FakeProcessingEngine(symbolFailure = NullPointerException("detector unavailable")),
+            Dispatchers.Unconfined,
+        )
+
+        onMainThread { viewModel.processImage(Uri.parse("content://test/detection-failure")) }
+
+        val state = viewModel.uiState.value
+        assertEquals(MapProcessingStage.COMPLETE, state.stage)
+        assertEquals(null, state.error)
+        assertTrue(state.controlPoints.isEmpty())
     }
 
     @Test
@@ -112,6 +149,40 @@ class Phase8ViewModelTest {
     }
 
     @Test
+    fun importedMap_opensAsUnsavedWorkingCopy() {
+        val bitmap = Bitmap.createBitmap(20, 10, Bitmap.Config.ARGB_8888)
+        val imported = SavedMap(
+            id = "exported-id",
+            name = "Imported course",
+            bitmap = bitmap,
+            pixelsPerMeter = 2f,
+            points = emptyList(),
+            route = null,
+            alternativeRoutes = emptyList(),
+            routeMetadata = emptyMap(),
+            routeRestrictions = emptyList(),
+            selectedRoutePointIds = emptyList(),
+            selectedRouteId = null,
+            routeMode = "SHORTEST",
+            routeBudgetMeters = null,
+            routeTargetScore = null,
+            lineStart = null,
+            lineEnd = null,
+            lineDistanceMeters = null,
+            rotationQuarterTurns = 0,
+        )
+        val viewModel = MapProcessingViewModel(FakeProcessingEngine(), Dispatchers.Unconfined)
+
+        onMainThread { viewModel.openImportedMap(imported) }
+
+        val state = viewModel.uiState.value
+        assertEquals(MapProcessingStage.COMPLETE, state.stage)
+        assertEquals(null, state.savedMapId)
+        assertEquals("Imported course", state.savedMapName)
+        assertTrue(state.savedContentDirty)
+    }
+
+    @Test
     fun routing_newGenerationAppendsAndSelectsAUniquelyNamedRoute() {
         val viewModel = RoutingViewModel(Dispatchers.Unconfined)
 
@@ -161,6 +232,84 @@ class Phase8ViewModelTest {
         assertTrue(after.routeMetadata.getValue(visible.id).isDisplayed)
     }
 
+    @Test
+    fun routing_restrictionsDoNotChangeExistingRouteAndApplyToNextGeneration() {
+        val viewModel = RoutingViewModel(Dispatchers.Unconfined)
+        val points = routePoints()
+        onMainThread { viewModel.calculateRoute(points, 1f, RouteMode.SHORTEST) }
+        val existing = requireNotNull(viewModel.uiState.value.route)
+        val control = points.single { it.type == ControlPointType.CONTROL }
+
+        onMainThread {
+            viewModel.manageRouteRestrictions(
+                RouteRestrictionAction.Add(
+                    RouteRestriction(RouteRestrictionType.BLACKLIST_CONTROL, control.id),
+                ),
+            )
+        }
+        assertTrue(existing.path.any { it.id == control.id })
+
+        onMainThread {
+            viewModel.calculateRoute(points, 1f, RouteMode.BEST_SCORE, budgetMeters = 10f)
+        }
+        val state = viewModel.uiState.value
+        val generated = (listOfNotNull(state.route) + state.alternativeRoutes)
+            .single { it.id == state.selectedRouteId }
+        assertTrue(generated.path.none { it.id == control.id })
+        assertTrue(existing.path.any { it.id == control.id })
+    }
+
+    @Test
+    fun routing_starredRestrictionsAreProtectedFromDeletion() {
+        val viewModel = RoutingViewModel(Dispatchers.Unconfined)
+        val restriction = RouteRestriction(RouteRestrictionType.BLACKLIST_CONTROL, "65")
+        onMainThread {
+            viewModel.manageRouteRestrictions(RouteRestrictionAction.Add(restriction))
+            viewModel.manageRouteRestrictions(RouteRestrictionAction.ToggleStar(restriction.id))
+            viewModel.manageRouteRestrictions(RouteRestrictionAction.Delete(restriction.id))
+            viewModel.manageRouteRestrictions(RouteRestrictionAction.DeleteAllUnstarred)
+        }
+        assertTrue(viewModel.uiState.value.routeRestrictions.single().isStarred)
+
+        onMainThread {
+            viewModel.manageRouteRestrictions(RouteRestrictionAction.ToggleStar(restriction.id))
+            viewModel.manageRouteRestrictions(RouteRestrictionAction.DeleteAllUnstarred)
+        }
+        assertTrue(viewModel.uiState.value.routeRestrictions.isEmpty())
+    }
+
+    @Test
+    fun routing_alternativesKeepPrefixThroughSelectedSplitPoint() {
+        val viewModel = RoutingViewModel(Dispatchers.Unconfined)
+        val points = listOf(
+            ControlPoint("start", 0, 0, Point2D(0f, 0f), ControlPointType.START),
+            ControlPoint("61", 61, 6, Point2D(2f, 1f), ControlPointType.CONTROL),
+            ControlPoint("72", 72, 7, Point2D(4f, -1f), ControlPointType.CONTROL),
+            ControlPoint("83", 83, 8, Point2D(5f, 3f), ControlPointType.CONTROL),
+            ControlPoint("finish", 0, 0, Point2D(8f, 0f), ControlPointType.FINISH),
+        )
+        onMainThread { viewModel.calculateRoute(points, 1f, RouteMode.SHORTEST) }
+        val source = requireNotNull(viewModel.uiState.value.route)
+
+        onMainThread {
+            viewModel.generateAlternativeRoutes(
+                points,
+                1f,
+                AlternativeRouteCriteria(
+                    count = 5,
+                    sourceRouteId = source.id,
+                    fixedPrefixPointCount = 2,
+                ),
+            )
+        }
+
+        val generated = viewModel.uiState.value.alternativeRoutes.filter {
+            viewModel.uiState.value.routeMetadata[it.id]?.isAlternative == true
+        }
+        assertTrue(generated.isNotEmpty())
+        assertTrue(generated.all { it.path.take(2).map(ControlPoint::id) == source.path.take(2).map(ControlPoint::id) })
+    }
+
     private fun routePoints() = listOf(
         ControlPoint("start", 0, 0, Point2D(0f, 0f), ControlPointType.START),
         ControlPoint("65", 65, 6, Point2D(3f, 4f), ControlPointType.CONTROL),
@@ -178,6 +327,8 @@ class Phase8ViewModelTest {
             Point2D(99f, 99f),
             Point2D(0f, 99f),
         ),
+        private val ocrFailure: Throwable? = null,
+        private val symbolFailure: Throwable? = null,
     ) : MapProcessingEngine {
         val calls = mutableListOf<String>()
         private val bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
@@ -192,6 +343,7 @@ class Phase8ViewModelTest {
 
         override fun detectControlSymbols(bitmap: Bitmap): List<DetectedControlSymbol> {
             calls += "symbols"
+            symbolFailure?.let { throw it }
             return listOf(
                 DetectedControlSymbol(Point2D(10f, 10f), 5f, ControlPointType.START),
                 DetectedControlSymbol(Point2D(50f, 50f), 5f, ControlPointType.CONTROL),
@@ -202,6 +354,10 @@ class Phase8ViewModelTest {
         override fun cropRegion(bitmap: Bitmap, symbol: DetectedControlSymbol): Bitmap =
             bitmap.also { calls += "crop" }
 
-        override suspend fun extractControlNumber(bitmap: Bitmap): Int? = 65.also { calls += "ocr" }
+        override suspend fun extractControlNumber(bitmap: Bitmap): Int? {
+            calls += "ocr"
+            ocrFailure?.let { throw it }
+            return 65
+        }
     }
 }
