@@ -1,6 +1,7 @@
 package com.orientesanasrekinatajs.ui.components
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Arrangement
@@ -15,15 +16,28 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -36,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
+import com.orientesanasrekinatajs.domain.model.ControlPoint
 import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
 
@@ -48,6 +63,7 @@ fun RouteDetailsBottomSheet(
     nextLongestRouteCount: Int = 0,
     routeMetadata: Map<String, RouteMetadata> = emptyMap(),
     selectedRouteId: String? = null,
+    showPointsPerKilometer: Boolean = false,
     onRouteSelected: (String) -> Unit = {},
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
@@ -157,6 +173,20 @@ fun RouteDetailsBottomSheet(
                                 text = scoreStatistics,
                                 style = MaterialTheme.typography.labelSmall,
                             )
+                            if (showPointsPerKilometer) {
+                                val pointsPerKilometer = if (candidate.totalDistanceMeters > 0f) {
+                                    candidate.totalScore * 1_000f / candidate.totalDistanceMeters
+                                } else {
+                                    0f
+                                }
+                                Text(
+                                    text = stringResource(
+                                        R.string.route_points_per_kilometer_format,
+                                        pointsPerKilometer,
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
                         }
                     },
                 )
@@ -169,62 +199,159 @@ fun RouteDetailsBottomSheet(
     }
 }
 
-/** Lightweight route-order editor shell. Drag-and-drop behavior will be added separately. */
+/** Edits the selected route's visit order and set of scored controls. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RouteEditorBottomSheet(
     route: OptimizedRoute,
+    allPoints: List<ControlPoint>,
+    onSave: (List<ControlPoint>) -> Unit,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var editedPath by remember(route.id) { mutableStateOf(route.path) }
+    var addPointMenuExpanded by remember { mutableStateOf(false) }
+    val usedPointIds = editedPath.mapTo(mutableSetOf(), ControlPoint::id)
+    val availableControls = allPoints.filter { point ->
+        point.type == ControlPointType.CONTROL && point.id !in usedPointIds
+    }.sortedBy(ControlPoint::code)
+    val canReverse = editedPath.any { it.type == ControlPointType.START_FINISH }
+    val movePoint: (Int, Int) -> Unit = { from, to ->
+        val reordered = editedPath.toMutableList()
+        val moved = reordered.removeAt(from)
+        reordered.add(to, moved)
+        editedPath = reordered
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
     ) {
-        Text(
-            text = stringResource(R.string.edit_route),
-            style = MaterialTheme.typography.titleLarge,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        Text(
-            text = stringResource(R.string.reorder_route_points_placeholder),
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.edit_route),
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.weight(1f)) {
+                    OutlinedButton(
+                        onClick = { addPointMenuExpanded = true },
+                        enabled = availableControls.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text(stringResource(R.string.add_route_point))
+                    }
+                    DropdownMenu(
+                        expanded = addPointMenuExpanded,
+                        onDismissRequest = { addPointMenuExpanded = false },
+                    ) {
+                        availableControls.forEach { point ->
+                            DropdownMenuItem(
+                                text = { Text(routeEditorPointLabel(point)) },
+                                onClick = {
+                                    val insertionIndex = editedPath.lastIndex.takeIf { index ->
+                                        editedPath.getOrNull(index)?.type in setOf(
+                                            ControlPointType.FINISH,
+                                            ControlPointType.START_FINISH,
+                                        )
+                                    } ?: editedPath.size
+                                    editedPath = editedPath.toMutableList().apply {
+                                        add(insertionIndex, point)
+                                    }
+                                    addPointMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+                OutlinedButton(
+                    onClick = { editedPath = editedPath.reversed() },
+                    enabled = canReverse,
+                ) {
+                    Icon(Icons.Default.SwapVert, contentDescription = null)
+                    Text(stringResource(R.string.reverse_route))
+                }
+            }
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(top = 6.dp),
+        ) {
             itemsIndexed(
-                items = route.path,
+                items = editedPath,
                 key = { index, control -> "$index:${control.id}" },
             ) { index, control ->
+                val isControl = control.type == ControlPointType.CONTROL
+                val canMoveUp = isControl && index > 0 &&
+                    editedPath[index - 1].type == ControlPointType.CONTROL
+                val canMoveDown = isControl && index < editedPath.lastIndex &&
+                    editedPath[index + 1].type == ControlPointType.CONTROL
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
                         text = (index + 1).toString(),
                         style = MaterialTheme.typography.labelLarge,
                     )
                     Text(
-                        text = when (control.type) {
-                            ControlPointType.START -> "S"
-                            ControlPointType.FINISH -> "F"
-                            ControlPointType.START_FINISH -> "-"
-                            ControlPointType.CONTROL -> control.code.toString()
-                        },
+                        text = routeEditorPointLabel(control),
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = {}, enabled = false) {
-                        Icon(Icons.Default.DragHandle, contentDescription = null)
+                    IconButton(onClick = { movePoint(index, index - 1) }, enabled = canMoveUp) {
+                        Icon(
+                            Icons.Default.ArrowUpward,
+                            contentDescription = stringResource(R.string.move_point_up),
+                        )
+                    }
+                    IconButton(onClick = { movePoint(index, index + 1) }, enabled = canMoveDown) {
+                        Icon(
+                            Icons.Default.ArrowDownward,
+                            contentDescription = stringResource(R.string.move_point_down),
+                        )
+                    }
+                    IconButton(
+                        onClick = { editedPath = editedPath.filterIndexed { i, _ -> i != index } },
+                        enabled = isControl,
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = stringResource(R.string.remove_route_point),
+                        )
                     }
                 }
-                if (index < route.path.lastIndex) HorizontalDivider()
+                if (index < editedPath.lastIndex) HorizontalDivider()
             }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onDismissRequest) { Text(stringResource(R.string.cancel)) }
+            Button(
+                onClick = { onSave(editedPath) },
+                enabled = editedPath != route.path && editedPath.size >= 2,
+            ) { Text(stringResource(R.string.save)) }
+        }
     }
+}
+
+private fun routeEditorPointLabel(point: ControlPoint): String = when (point.type) {
+    ControlPointType.START -> "S"
+    ControlPointType.FINISH -> "F"
+    ControlPointType.START_FINISH -> "S/F"
+    ControlPointType.CONTROL -> "${point.code} (${point.points})"
 }
 
 /** Scrollable tabular representation used by the route details bottom sheet. */

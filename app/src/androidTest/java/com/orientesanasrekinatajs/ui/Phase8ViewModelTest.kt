@@ -233,6 +233,30 @@ class Phase8ViewModelTest {
     }
 
     @Test
+    fun routing_editPathPreservesRouteIdentityAndRebuildsStatistics() {
+        val viewModel = RoutingViewModel(Dispatchers.Unconfined)
+        val points = routePoints()
+        onMainThread { viewModel.calculateRoute(points, 1f, RouteMode.SHORTEST) }
+        val before = requireNotNull(viewModel.uiState.value.route)
+
+        onMainThread {
+            viewModel.manageRoutes(
+                RouteManagementAction.UpdatePath(
+                    routeId = before.id,
+                    path = listOf(points.first(), points.last()),
+                    pixelsPerMeter = 1f,
+                ),
+            )
+        }
+
+        val edited = requireNotNull(viewModel.uiState.value.route)
+        assertEquals(before.id, edited.id)
+        assertEquals(listOf("start", "finish"), edited.path.map(ControlPoint::id))
+        assertEquals(10f, edited.totalDistanceMeters)
+        assertEquals(0, edited.totalScore)
+    }
+
+    @Test
     fun routing_restrictionsDoNotChangeExistingRouteAndApplyToNextGeneration() {
         val viewModel = RoutingViewModel(Dispatchers.Unconfined)
         val points = routePoints()

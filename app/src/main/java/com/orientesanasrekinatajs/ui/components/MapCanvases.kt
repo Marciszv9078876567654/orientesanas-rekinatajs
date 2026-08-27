@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateRotation
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.runtime.Composable
@@ -54,12 +55,18 @@ fun InteractiveCornerCanvas(
     boundary: MapBoundary,
     onBoundaryChange: (MapBoundary) -> Unit,
     rotationQuarterTurns: Int = 0,
+    rotationOffsetDegrees: Float = 0f,
+    rotationGesturesEnabled: Boolean = true,
+    onRotationGesture: (Float) -> Unit = {},
     recenterKey: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val latestBoundary by rememberUpdatedState(boundary)
     val latestOnBoundaryChange by rememberUpdatedState(onBoundaryChange)
+    val latestRotationOffset by rememberUpdatedState(rotationOffsetDegrees)
+    val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
+    val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
     val lineColor = Color(0xFFFFC107)
     val handleColor = Color(0xFFE91E63)
     val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
@@ -67,10 +74,6 @@ fun InteractiveCornerCanvas(
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-    LaunchedEffect(rotationQuarterTurns) {
-        zoom = 1f
-        pan = Offset.Zero
-    }
     LaunchedEffect(recenterKey) {
         if (recenterKey > 0) {
             animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
@@ -101,6 +104,7 @@ fun InteractiveCornerCanvas(
                     val down = awaitFirstDown()
                     val initialViewport = viewportTransform(
                         size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
+                        rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                     )
                     var selectedCorner = latestBoundary.corners()
                         .map(initialViewport::toCanvas)
@@ -113,6 +117,9 @@ fun InteractiveCornerCanvas(
                         val event = awaitPointerEvent()
                         if (event.changes.size > 1) {
                             selectedCorner = null
+                            if (latestRotationGesturesEnabled) {
+                                latestOnRotationGesture(event.calculateRotation())
+                            }
                             updateViewportGesture(
                                 zoomChange = event.calculateZoom(),
                                 panChange = event.calculatePan(),
@@ -130,6 +137,7 @@ fun InteractiveCornerCanvas(
                                         val viewport = viewportTransform(
                                             size, bitmap.width, bitmap.height,
                                             rotationQuarterTurns, zoom, pan,
+                                            rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                                         )
                                         latestOnBoundaryChange(
                                             latestBoundary.withCorner(
@@ -151,7 +159,7 @@ fun InteractiveCornerCanvas(
     ) {
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
-            rotationDegrees = animatedRotation,
+            rotationDegrees = animatedRotation + rotationOffsetDegrees,
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
@@ -176,6 +184,7 @@ data class RouteRenderLayer(
     val color: Color,
     val isActive: Boolean,
     val isPinned: Boolean = !isActive,
+    val patternIndex: Int = 0,
 )
 
 @Composable
@@ -184,12 +193,17 @@ fun RouteRenderingCanvas(
     route: List<ControlPoint>,
     allPoints: List<ControlPoint> = route,
     rotationQuarterTurns: Int = 0,
+    rotationOffsetDegrees: Float = 0f,
+    rotationGesturesEnabled: Boolean = true,
+    onRotationGesture: (Float) -> Unit = {},
     recenterKey: Int = 0,
     routeLayers: List<RouteRenderLayer>? = null,
     modifier: Modifier = Modifier,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val animationsEnabled = LocalAnimationsEnabled.current
+    val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
+    val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
     val effectiveLayers = routeLayers ?: run {
         listOf(RouteRenderLayer("active", route, Color(0xFF1565C0), true))
     }
@@ -201,10 +215,6 @@ fun RouteRenderingCanvas(
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
 
-    LaunchedEffect(rotationQuarterTurns) {
-        zoom = 1f
-        pan = Offset.Zero
-    }
     LaunchedEffect(recenterKey) {
         if (recenterKey > 0) {
             animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
@@ -236,6 +246,9 @@ fun RouteRenderingCanvas(
                     while (true) {
                         val event = awaitPointerEvent()
                         if (event.changes.any { it.pressed }) {
+                            if (event.changes.size > 1 && latestRotationGesturesEnabled) {
+                                latestOnRotationGesture(event.calculateRotation())
+                            }
                             val centroid = event.calculateCentroid(useCurrent = true)
                             if (centroid.x.isFinite() && centroid.y.isFinite()) {
                                 updateViewportGesture(
@@ -256,7 +269,7 @@ fun RouteRenderingCanvas(
     ) {
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
-            rotationDegrees = animatedRotation,
+            rotationDegrees = animatedRotation + rotationOffsetDegrees,
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
@@ -269,9 +282,9 @@ fun RouteRenderingCanvas(
                 drawRouteLines(
                     points = centers,
                     progress = 1f,
-                    color = layer.color.copy(alpha = 0.88f),
-                    dashed = true,
-                    strokeWidth = 5f,
+                    color = layer.color.copy(alpha = 0.82f),
+                    dashIntervals = pinnedRouteDashIntervals(layer.patternIndex),
+                    strokeWidth = 4f,
                 )
             }
         }
@@ -305,6 +318,9 @@ fun DistanceCalibrationCanvas(
     onLineChange: (Point2D?, Point2D?) -> Unit,
     controlPoints: List<ControlPoint> = emptyList(),
     rotationQuarterTurns: Int = 0,
+    rotationOffsetDegrees: Float = 0f,
+    rotationGesturesEnabled: Boolean = true,
+    onRotationGesture: (Float) -> Unit = {},
     recenterKey: Int = 0,
     modifier: Modifier = Modifier,
 ) {
@@ -315,12 +331,11 @@ fun DistanceCalibrationCanvas(
     val latestStart by rememberUpdatedState(start)
     val latestEnd by rememberUpdatedState(end)
     val latestOnLineChange by rememberUpdatedState(onLineChange)
+    val latestRotationOffset by rememberUpdatedState(rotationOffsetDegrees)
+    val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
+    val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
     val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
     val animationsEnabled = LocalAnimationsEnabled.current
-    LaunchedEffect(rotationQuarterTurns) {
-        zoom = 1f
-        pan = Offset.Zero
-    }
     LaunchedEffect(recenterKey) {
         if (recenterKey > 0) {
             animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
@@ -351,6 +366,7 @@ fun DistanceCalibrationCanvas(
                     val down = awaitFirstDown()
                     val initialViewport = viewportTransform(
                         size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
+                        rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                     )
                     val handles = listOfNotNull(latestStart, latestEnd)
                     var selectedHandle = handles
@@ -368,6 +384,9 @@ fun DistanceCalibrationCanvas(
                         if (event.changes.size > 1) {
                             usedMultiTouch = true
                             selectedHandle = null
+                            if (latestRotationGesturesEnabled) {
+                                latestOnRotationGesture(event.calculateRotation())
+                            }
                             updateViewportGesture(
                                 event.calculateZoom(),
                                 event.calculatePan(),
@@ -387,6 +406,7 @@ fun DistanceCalibrationCanvas(
                                         val viewport = viewportTransform(
                                             size, bitmap.width, bitmap.height,
                                             rotationQuarterTurns, zoom, pan,
+                                            rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                                         )
                                         val point = viewport.toImage(change.position)
                                         if (selectedHandle == 0) {
@@ -407,6 +427,7 @@ fun DistanceCalibrationCanvas(
                     if (!usedMultiTouch && moved <= TAP_SLOP_PX && selectedHandle == null) {
                         val viewport = viewportTransform(
                             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
+                            rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                         )
                         val point = viewport.toImage(lastPosition)
                         when {
@@ -419,7 +440,7 @@ fun DistanceCalibrationCanvas(
     ) {
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
-            rotationDegrees = animatedRotation,
+            rotationDegrees = animatedRotation + rotationOffsetDegrees,
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
@@ -450,6 +471,9 @@ fun InteractiveControlPointCanvas(
     bitmap: Bitmap,
     points: List<ControlPoint>,
     rotationQuarterTurns: Int,
+    rotationOffsetDegrees: Float = 0f,
+    rotationGesturesEnabled: Boolean = true,
+    onRotationGesture: (Float) -> Unit = {},
     onPointMoved: (ControlPoint) -> Unit,
     onPointSelected: (ControlPoint) -> Unit,
     onViewportCenterChange: (Point2D) -> Unit,
@@ -460,16 +484,15 @@ fun InteractiveControlPointCanvas(
     val latestPoints by rememberUpdatedState(points)
     val latestOnPointMoved by rememberUpdatedState(onPointMoved)
     val latestOnPointSelected by rememberUpdatedState(onPointSelected)
+    val latestRotationOffset by rememberUpdatedState(rotationOffsetDegrees)
+    val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
+    val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val latestOnViewportCenterChange by rememberUpdatedState(onViewportCenterChange)
     val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
     val animationsEnabled = LocalAnimationsEnabled.current
-    LaunchedEffect(rotationQuarterTurns) {
-        zoom = 1f
-        pan = Offset.Zero
-    }
     LaunchedEffect(recenterKey) {
         if (recenterKey > 0) {
             animateViewportToCenter(zoom, pan, animationsEnabled) { newZoom, newPan ->
@@ -478,10 +501,11 @@ fun InteractiveControlPointCanvas(
             }
         }
     }
-    LaunchedEffect(viewportSize, rotationQuarterTurns, zoom, pan) {
+    LaunchedEffect(viewportSize, rotationQuarterTurns, rotationOffsetDegrees, zoom, pan) {
         if (viewportSize.width > 0 && viewportSize.height > 0) {
             val viewport = viewportTransform(
                 viewportSize, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
+                rotationDegrees = rotationQuarterTurns * 90f + rotationOffsetDegrees,
             )
             latestOnViewportCenterChange(
                 viewport.toImage(Offset(viewportSize.width / 2f, viewportSize.height / 2f)),
@@ -510,6 +534,7 @@ fun InteractiveControlPointCanvas(
                     val down = awaitFirstDown()
                     val initialViewport = viewportTransform(
                         size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
+                        rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                     )
                     var selectedId = latestPoints
                         .map { it.id to (initialViewport.toCanvas(it.center) - down.position).getDistance() }
@@ -524,6 +549,9 @@ fun InteractiveControlPointCanvas(
                         if (event.changes.size > 1) {
                             usedMultiTouch = true
                             selectedId = null
+                            if (latestRotationGesturesEnabled) {
+                                latestOnRotationGesture(event.calculateRotation())
+                            }
                             updateViewportGesture(
                                 event.calculateZoom(),
                                 event.calculatePan(),
@@ -543,6 +571,7 @@ fun InteractiveControlPointCanvas(
                                         val viewport = viewportTransform(
                                             size, bitmap.width, bitmap.height,
                                             rotationQuarterTurns, zoom, pan,
+                                            rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                                         )
                                         latestOnPointMoved(selected.copy(center = viewport.toImage(change.position)))
                                     } else {
@@ -562,7 +591,7 @@ fun InteractiveControlPointCanvas(
     ) {
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
-            rotationDegrees = animatedRotation,
+            rotationDegrees = animatedRotation + rotationOffsetDegrees,
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
@@ -599,7 +628,7 @@ private fun DrawScope.drawRouteLines(
     points: List<Offset>,
     progress: Float,
     color: Color,
-    dashed: Boolean = false,
+    dashIntervals: FloatArray? = null,
     strokeWidth: Float = 7f,
 ) {
     if (points.size < 2 || progress <= 0f) return
@@ -617,10 +646,17 @@ private fun DrawScope.drawRouteLines(
             end = start + (end - start) * fraction,
             strokeWidth = strokeWidth,
             cap = StrokeCap.Round,
-            pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(18f, 12f)) else null,
+            pathEffect = dashIntervals?.let { PathEffect.dashPathEffect(it) },
         )
         remaining -= length
     }
+}
+
+private fun pinnedRouteDashIntervals(patternIndex: Int): FloatArray = when (patternIndex.mod(4)) {
+    0 -> floatArrayOf(18f, 12f)
+    1 -> floatArrayOf(2f, 10f)
+    2 -> floatArrayOf(18f, 8f, 2f, 8f)
+    else -> floatArrayOf(28f, 10f)
 }
 
 private fun DrawScope.drawReferencePoints(

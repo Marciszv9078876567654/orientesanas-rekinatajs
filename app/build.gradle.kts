@@ -19,7 +19,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        resourceConfigurations += listOf("en", "lv")
+        androidResources {
+            localeFilters += listOf("en", "lv")
+        }
 
         // Compile remove x86/x86_64 instructions, may cause incompatability
         ndk {

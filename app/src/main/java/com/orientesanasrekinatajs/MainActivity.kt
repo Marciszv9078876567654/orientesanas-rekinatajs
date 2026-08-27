@@ -169,6 +169,8 @@ class MainActivity : AppCompatActivity() {
                     onUpdateTheme = settingsViewModel::updateTheme,
                     onUpdateLanguage = settingsViewModel::updateLanguage,
                     onUpdateAnimations = settingsViewModel::updateAnimations,
+                    onUpdateMapRotationGestures = settingsViewModel::updateMapRotationGestures,
+                    onUpdatePointsPerKilometer = settingsViewModel::updatePointsPerKilometer,
                     onUpdateUsageTips = settingsViewModel::updateUsageTips,
                     modifier = Modifier.fillMaxSize(),
                 )

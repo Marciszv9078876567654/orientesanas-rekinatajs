@@ -87,6 +87,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -165,6 +166,7 @@ import com.orientesanasrekinatajs.ui.transfer.MapTransferUiState
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 @Composable
 fun OrienteeringApp(
@@ -203,6 +205,8 @@ fun OrienteeringApp(
     onUpdateTheme: (ThemeConfig) -> Unit,
     onUpdateLanguage: (LanguageConfig) -> Unit,
     onUpdateAnimations: (Boolean) -> Unit,
+    onUpdateMapRotationGestures: (Boolean) -> Unit,
+    onUpdatePointsPerKilometer: (Boolean) -> Unit,
     onUpdateUsageTips: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -214,8 +218,25 @@ fun OrienteeringApp(
         ?: processingState.sourceUri?.toString()
         ?: processingState.rectifiedBitmap?.let { "saved-${it.hashCode()}" }
         ?: "home"
-    var mapRotation by rememberSaveable(mapSessionKey) {
+    val rotationSessionKey = processingState.rectifiedBitmap?.let { "bitmap-${it.hashCode()}" }
+        ?: processingState.sourceUri?.toString()
+        ?: mapSessionKey
+    var mapRotation by rememberSaveable(rotationSessionKey) {
         mutableIntStateOf(processingState.savedRotationQuarterTurns)
+    }
+    var mapRotationOffsetDegrees by rememberSaveable(rotationSessionKey) { mutableFloatStateOf(0f) }
+    val applyRotationGesture: (Float) -> Unit = { change ->
+        if (userPreferences.enableMapRotationGestures && change.isFinite()) {
+            mapRotationOffsetDegrees = (mapRotationOffsetDegrees + change) % 360f
+        }
+    }
+    val snapMapRotation: () -> Unit = {
+        mapRotation = ((mapRotation * 90f + mapRotationOffsetDegrees) / 90f).roundToInt()
+        mapRotationOffsetDegrees = 0f
+    }
+    val setMapRotation: (Int) -> Unit = { quarterTurns ->
+        mapRotation = quarterTurns
+        mapRotationOffsetDegrees = 0f
     }
     val statusBarColor = MaterialTheme.colorScheme.surfaceContainer
     val view = LocalView.current
@@ -244,7 +265,11 @@ fun OrienteeringApp(
                     bitmap = processingState.sourceBitmap,
                     error = processingState.error,
                     rotation = mapRotation,
-                    onRotationChange = { mapRotation = it },
+                    rotationOffsetDegrees = mapRotationOffsetDegrees,
+                    rotationGesturesEnabled = userPreferences.enableMapRotationGestures,
+                    onRotationGesture = applyRotationGesture,
+                    onSnapRotation = snapMapRotation,
+                    onRotationChange = setMapRotation,
                     onApplyBoundary = onApplyBoundary,
                     onBack = onReset,
                 )
@@ -253,6 +278,7 @@ fun OrienteeringApp(
                     processingState = processingState,
                     routingState = routingState,
                     defaultBudgetMeters = userPreferences.defaultDistanceBudgetKm * 1_000f,
+                    showPointsPerKilometer = userPreferences.showPointsPerKilometer,
                     showUsageTips = userPreferences.showUsageTips &&
                         usageTipDismissedForUri != processingState.sourceUri?.toString(),
                     onUsageTipDismissed = {
@@ -276,7 +302,11 @@ fun OrienteeringApp(
                     isSavingMap = savedMapsState.isSaving,
                     isTransferringMap = mapTransferState.isWorking,
                     rotation = mapRotation,
-                    onRotationChange = { mapRotation = it },
+                    rotationOffsetDegrees = mapRotationOffsetDegrees,
+                    rotationGesturesEnabled = userPreferences.enableMapRotationGestures,
+                    onRotationGesture = applyRotationGesture,
+                    onSnapRotation = snapMapRotation,
+                    onRotationChange = setMapRotation,
                     onBackHome = onReset,
                 )
                 else -> ImageSourceScreen(
@@ -296,6 +326,8 @@ fun OrienteeringApp(
             onUpdateTheme = onUpdateTheme,
             onUpdateLanguage = onUpdateLanguage,
             onUpdateAnimations = onUpdateAnimations,
+            onUpdateMapRotationGestures = onUpdateMapRotationGestures,
+            onUpdatePointsPerKilometer = onUpdatePointsPerKilometer,
             onUpdateUsageTips = onUpdateUsageTips,
             onClearAllSavedMaps = onClearAllSavedMaps,
             hasSavedMaps = savedMapsState.maps.isNotEmpty(),
@@ -418,6 +450,10 @@ private fun ManualBoundaryScreen(
     bitmap: Bitmap,
     error: String,
     rotation: Int,
+    rotationOffsetDegrees: Float,
+    rotationGesturesEnabled: Boolean,
+    onRotationGesture: (Float) -> Unit,
+    onSnapRotation: () -> Unit,
     onRotationChange: (Int) -> Unit,
     onApplyBoundary: (MapBoundary) -> Unit,
     onBack: () -> Unit,
@@ -434,12 +470,15 @@ private fun ManualBoundaryScreen(
                 boundary = boundary,
                 onBoundaryChange = { boundary = it },
                 rotationQuarterTurns = rotation,
+                rotationOffsetDegrees = rotationOffsetDegrees,
+                rotationGesturesEnabled = rotationGesturesEnabled,
+                onRotationGesture = onRotationGesture,
                 recenterKey = recenterKey,
                 modifier = Modifier.fillMaxSize(),
             )
             MapOverlayButtons(
                 onRotate = { onRotationChange(rotation + 1) },
-                onRecenter = { recenterKey++ },
+                onRecenter = { onSnapRotation(); recenterKey++ },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
         }
@@ -477,6 +516,7 @@ private fun MapFlowScreen(
     processingState: MapProcessingUiState,
     routingState: RoutingUiState,
     defaultBudgetMeters: Float,
+    showPointsPerKilometer: Boolean,
     showUsageTips: Boolean,
     onUsageTipDismissed: () -> Unit,
     onApplyEditedBoundary: (MapBoundary, Point2D?, Point2D?, Float?) -> Unit,
@@ -497,6 +537,10 @@ private fun MapFlowScreen(
     isSavingMap: Boolean,
     isTransferringMap: Boolean,
     rotation: Int,
+    rotationOffsetDegrees: Float,
+    rotationGesturesEnabled: Boolean,
+    onRotationGesture: (Float) -> Unit,
+    onSnapRotation: () -> Unit,
     onRotationChange: (Int) -> Unit,
     onBackHome: () -> Unit,
 ) {
@@ -504,7 +548,11 @@ private fun MapFlowScreen(
         ?: processingState.rectifiedBitmap?.hashCode()?.toString()
     var page by rememberSaveable(sessionKey) {
         mutableStateOf(
-            if (routingState.route != null) MapPage.ROUTE else MapPage.EDIT,
+            if (processingState.savedMapId != null || routingState.route != null) {
+                MapPage.ROUTE
+            } else {
+                MapPage.EDIT
+            },
         )
     }
     val rectified = requireNotNull(processingState.rectifiedBitmap)
@@ -567,7 +615,7 @@ private fun MapFlowScreen(
                 lineStart = lineStart,
                 lineEnd = lineEnd,
                 lineDistanceMeters = lineMeters,
-                rotationQuarterTurns = rotation,
+                rotationQuarterTurns = ((rotation * 90f + rotationOffsetDegrees) / 90f).roundToInt(),
                 existingId = existingId,
                 name = name,
             )
@@ -625,7 +673,12 @@ private fun MapFlowScreen(
             preferredSelectedRoutePointIds = routingState.selectedRoutePointIds,
             preferredSelectedRouteId = routingState.selectedRouteId,
             allPoints = processingState.controlPoints,
+            pixelsPerMeter = effectivePixelsPerMeter,
             rotation = rotation,
+            rotationOffsetDegrees = rotationOffsetDegrees,
+            rotationGesturesEnabled = rotationGesturesEnabled,
+            onRotationGesture = { change -> isDirty = true; onRotationGesture(change) },
+            onSnapRotation = { isDirty = true; onSnapRotation() },
             onRotationChange = { isDirty = true; onRotationChange(it) },
             canSave = effectivePixelsPerMeter != null,
             isSaving = isSavingMap,
@@ -657,6 +710,7 @@ private fun MapFlowScreen(
             routeTargetScore = routingState.targetScore,
             routingError = routingState.error,
             defaultBudgetMeters = defaultBudgetMeters,
+            showPointsPerKilometer = showPointsPerKilometer,
             canCalculateRoute = effectivePixelsPerMeter != null,
             onCalculatePrimaryRoute = { mode, budget, targetScore ->
                 isDirty = true
@@ -725,13 +779,8 @@ private fun MapFlowScreen(
                 editOpenedFromRoute = false
                 page = MapPage.ROUTE
             },
-            canSave = effectivePixelsPerMeter != null,
             isSaving = isSavingMap,
-            isExporting = isTransferringMap,
             isDirty = isDirty,
-            savedMapId = savedMapId,
-            onSave = { saveCopy -> saveCurrentMap(routingState.route, saveCopy) },
-            onExport = requestExport,
             lineStart = lineStart,
             lineEnd = lineEnd,
             lineDistanceText = lineDistanceText,
@@ -749,6 +798,10 @@ private fun MapFlowScreen(
                 lineDistanceText = it
             },
             rotation = rotation,
+            rotationOffsetDegrees = rotationOffsetDegrees,
+            rotationGesturesEnabled = rotationGesturesEnabled,
+            onRotationGesture = { change -> isDirty = true; onRotationGesture(change) },
+            onSnapRotation = { isDirty = true; onSnapRotation() },
             onRotationChange = {
                 isDirty = true
                 mapEditChangedSinceEntry = true
@@ -860,19 +913,18 @@ private fun EditMapScreen(
     onRemoveControlPoint: (String) -> Unit,
     onClearControlPoints: () -> Unit,
     onOpenRoute: () -> Unit,
-    canSave: Boolean,
     isSaving: Boolean,
-    isExporting: Boolean,
     isDirty: Boolean,
-    savedMapId: String?,
-    onSave: (Boolean) -> Unit,
-    onExport: () -> Unit,
     lineStart: Point2D?,
     lineEnd: Point2D?,
     lineDistanceText: String,
     onLineChange: (Point2D?, Point2D?) -> Unit,
     onLineDistanceChange: (String) -> Unit,
     rotation: Int,
+    rotationOffsetDegrees: Float,
+    rotationGesturesEnabled: Boolean,
+    onRotationGesture: (Float) -> Unit,
+    onSnapRotation: () -> Unit,
     onRotationChange: (Int) -> Unit,
     onCancel: (() -> Unit)?,
     onBack: () -> Unit,
@@ -892,7 +944,6 @@ private fun EditMapScreen(
     var confirmLeaveEdit by rememberSaveable { mutableStateOf(false) }
     var confirmDiscardPointChanges by rememberSaveable { mutableStateOf(false) }
     var confirmDiscardCornerChanges by rememberSaveable { mutableStateOf(false) }
-    var showSaveConfirmation by rememberSaveable { mutableStateOf(false) }
     var pendingBackAfterSave by rememberSaveable { mutableStateOf(false) }
     var viewportCenterPoint by remember(rectified) {
         mutableStateOf(Point2D(rectified.width / 2f, rectified.height / 2f))
@@ -1000,19 +1051,6 @@ private fun EditMapScreen(
                         )
                     }
                 })
-                editMode == EditMode.CALIBRATION -> ({
-                    Row {
-                        IconButton(onClick = onExport, enabled = canSave && !isExporting) {
-                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.export_map))
-                        }
-                        IconButton(
-                            onClick = { showSaveConfirmation = true },
-                            enabled = canSave && !isSaving,
-                        ) {
-                            Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_map))
-                        }
-                    }
-                })
                 else -> null
             },
         )
@@ -1031,6 +1069,9 @@ private fun EditMapScreen(
                             boundary = editedBoundary!!,
                             onBoundaryChange = { editedBoundary = it },
                             rotationQuarterTurns = rotation,
+                            rotationOffsetDegrees = rotationOffsetDegrees,
+                            rotationGesturesEnabled = rotationGesturesEnabled,
+                            onRotationGesture = onRotationGesture,
                             recenterKey = recenterKey,
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -1039,6 +1080,9 @@ private fun EditMapScreen(
                         bitmap = rectified,
                         points = visiblePoints,
                         rotationQuarterTurns = rotation,
+                        rotationOffsetDegrees = rotationOffsetDegrees,
+                        rotationGesturesEnabled = rotationGesturesEnabled,
+                        onRotationGesture = onRotationGesture,
                         onPointMoved = { moved ->
                             editedPoints = visiblePoints.map { if (it.id == moved.id) moved else it }
                         },
@@ -1054,13 +1098,16 @@ private fun EditMapScreen(
                         onLineChange = onLineChange,
                         controlPoints = processingState.controlPoints,
                         rotationQuarterTurns = rotation,
+                        rotationOffsetDegrees = rotationOffsetDegrees,
+                        rotationGesturesEnabled = rotationGesturesEnabled,
+                        onRotationGesture = onRotationGesture,
                         recenterKey = recenterKey,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
                 MapOverlayButtons(
                     onRotate = { onRotationChange(rotation + 1) },
-                    onRecenter = { recenterKey++ },
+                    onRecenter = { onSnapRotation(); recenterKey++ },
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 )
                 if (editMode == EditMode.POINTS) {
@@ -1266,36 +1313,6 @@ private fun EditMapScreen(
             onDismiss = { confirmDiscardCornerChanges = false },
         )
     }
-    if (showSaveConfirmation) {
-        AlertDialog(
-            onDismissRequest = { if (!isSaving) showSaveConfirmation = false },
-            title = { CenteredDialogTitle(stringResource(R.string.save_map_confirmation_title)) },
-            text = { Text(stringResource(R.string.save_map_confirmation_message)) },
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (savedMapId != null) {
-                        TextButton(
-                            onClick = { showSaveConfirmation = false; onSave(true) },
-                            enabled = !isSaving,
-                        ) { Text(stringResource(R.string.save_copy)) }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    TextButton(
-                        onClick = { showSaveConfirmation = false },
-                        enabled = !isSaving,
-                    ) { Text(stringResource(R.string.cancel)) }
-                    TextButton(
-                        onClick = { showSaveConfirmation = false; onSave(false) },
-                        enabled = !isSaving,
-                    ) { Text(stringResource(R.string.save)) }
-                }
-            },
-        )
-    }
-
     selectedPointId?.let { id ->
         visiblePoints.firstOrNull { it.id == id }?.let { point ->
             ControlPointEditorDialog(
@@ -1486,7 +1503,12 @@ private fun RouteScreen(
     preferredSelectedRoutePointIds: List<String>,
     preferredSelectedRouteId: String?,
     allPoints: List<ControlPoint>,
+    pixelsPerMeter: Float?,
     rotation: Int,
+    rotationOffsetDegrees: Float,
+    rotationGesturesEnabled: Boolean,
+    onRotationGesture: (Float) -> Unit,
+    onSnapRotation: () -> Unit,
     onRotationChange: (Int) -> Unit,
     canSave: Boolean,
     isSaving: Boolean,
@@ -1508,6 +1530,7 @@ private fun RouteScreen(
     routeTargetScore: Int?,
     routingError: String?,
     defaultBudgetMeters: Float,
+    showPointsPerKilometer: Boolean,
     canCalculateRoute: Boolean,
     onCalculatePrimaryRoute: (RouteMode, Float?, Int?) -> Unit,
     isGeneratingAlternatives: Boolean,
@@ -1546,6 +1569,7 @@ private fun RouteScreen(
     var showSaveConfirmation by rememberSaveable { mutableStateOf(false) }
     var showUnsavedHomeConfirmation by rememberSaveable { mutableStateOf(false) }
     var pendingHomeAfterSave by rememberSaveable { mutableStateOf(false) }
+    var showMapActions by rememberSaveable { mutableStateOf(false) }
     var showRouteMenu by rememberSaveable { mutableStateOf(false) }
     var showRouteEditor by rememberSaveable { mutableStateOf(false) }
     var showRouteRestrictions by rememberSaveable { mutableStateOf(false) }
@@ -1634,21 +1658,10 @@ private fun RouteScreen(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .fillMaxWidth()
-                        .padding(
-                            horizontal = if (savedMapId != null && !isDirty) 96.dp else 48.dp,
-                        ),
+                        .padding(horizontal = 48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    if (savedMapId != null) {
-                        IconButton(onClick = { showRename = true }, modifier = Modifier.size(32.dp)) {
-                            Icon(
-                                Icons.Default.DriveFileRenameOutline,
-                                contentDescription = stringResource(R.string.rename_route),
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
                     Text(
                         text = when {
                             savedMapId != null && isDirty -> stringResource(
@@ -1665,20 +1678,49 @@ private fun RouteScreen(
                         modifier = Modifier.weight(1f, fill = false),
                     )
                 }
-                Row(Modifier.align(Alignment.CenterEnd)) {
-                    IconButton(
-                        onClick = { showSaveConfirmation = true },
-                        enabled = canSave && !isSaving,
-                    ) {
-                        Icon(Icons.Default.Save, contentDescription = stringResource(R.string.save_map))
+                Box(Modifier.align(Alignment.CenterEnd)) {
+                    IconButton(onClick = { showMapActions = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.map_actions))
                     }
-                    if (savedMapId != null && !isDirty) {
-                        IconButton(onClick = { showDeleteConfirmation = true }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.delete_saved_route),
-                            )
-                        }
+                    DropdownMenu(
+                        expanded = showMapActions,
+                        onDismissRequest = { showMapActions = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.rename_route)) },
+                            leadingIcon = {
+                                Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null)
+                            },
+                            enabled = savedMapId != null,
+                            onClick = { showMapActions = false; showRename = true },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.save_map)) },
+                            leadingIcon = { Icon(Icons.Default.Save, contentDescription = null) },
+                            enabled = canSave && !isSaving,
+                            onClick = { showMapActions = false; showSaveConfirmation = true },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.delete_saved_route)) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            enabled = savedMapId != null && !isDirty,
+                            onClick = { showMapActions = false; showDeleteConfirmation = true },
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.edit_map)) },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                showMapActions = false
+                                if (availableRoutes.isNotEmpty()) showEditMapRouteWarning = true else onEdit()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.export_map)) },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            enabled = canSave && !isExporting,
+                            onClick = { showMapActions = false; onExport() },
+                        )
                     }
                 }
             }
@@ -1696,16 +1738,20 @@ private fun RouteScreen(
                         points = candidate.path,
                         color = routeColor(metadata.colorIndex),
                         isActive = isActive,
+                        patternIndex = metadata.colorIndex,
                     )
                 },
                 allPoints = allPoints,
                 rotationQuarterTurns = rotation,
+                rotationOffsetDegrees = rotationOffsetDegrees,
+                rotationGesturesEnabled = rotationGesturesEnabled,
+                onRotationGesture = onRotationGesture,
                 recenterKey = recenterKey,
                 modifier = Modifier.fillMaxSize(),
             )
             MapOverlayButtons(
                 onRotate = { onRotationChange(rotation + 1) },
-                onRecenter = { recenterKey++ },
+                onRecenter = { onSnapRotation(); recenterKey++ },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
             if (isCalculatingRoute) {
@@ -1755,7 +1801,7 @@ private fun RouteScreen(
                         modifier = Modifier.size(48.dp),
                         contentPadding = PaddingValues(0.dp),
                     ) {
-                        Icon(Icons.Default.MoreHoriz, contentDescription = stringResource(R.string.route_actions))
+                        Icon(Icons.Default.Route, contentDescription = stringResource(R.string.route_actions))
                     }
                     if (showRouteMenu) {
                         Popup(
@@ -1771,15 +1817,6 @@ private fun RouteScreen(
                                 shadowElevation = 8.dp,
                             ) {
                                 Column {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.edit_map)) },
-                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                        onClick = {
-                                            showRouteMenu = false
-                                            if (route != null) showEditMapRouteWarning = true else onEdit()
-                                        },
-                                    )
-                                    HorizontalDivider()
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.generate_route)) },
                                         leadingIcon = {
@@ -1816,7 +1853,8 @@ private fun RouteScreen(
                                     )
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.edit_route)) },
-                                        leadingIcon = { Icon(Icons.Default.MoreHoriz, contentDescription = null) },
+                                        enabled = displayedRoute != null && pixelsPerMeter != null,
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                                         onClick = { showRouteMenu = false; showRouteEditor = true },
                                     )
                                     DropdownMenuItem(
@@ -1829,13 +1867,6 @@ private fun RouteScreen(
                                             showRouteMenu = false
                                             showManageRoutes = true
                                         },
-                                    )
-                                    HorizontalDivider()
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.export_map)) },
-                                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
-                                        enabled = canSave && !isExporting,
-                                        onClick = { showRouteMenu = false; onExport() },
                                     )
                                 }
                             }
@@ -1864,6 +1895,7 @@ private fun RouteScreen(
             nextLongestRouteCount = nextLongestRouteCount,
             routeMetadata = routeMetadata,
             selectedRouteId = selectedRouteId,
+            showPointsPerKilometer = showPointsPerKilometer,
             onRouteSelected = { newRouteId ->
                 if (newRouteId != selectedRouteId) {
                     selectedRouteId = newRouteId
@@ -1877,6 +1909,15 @@ private fun RouteScreen(
     if (showRouteEditor && displayedRoute != null) {
         RouteEditorBottomSheet(
             route = displayedRoute,
+            allPoints = allPoints,
+            onSave = { editedPath ->
+                pixelsPerMeter?.let { scale ->
+                    onManageRoutes(
+                        RouteManagementAction.UpdatePath(displayedRoute.id, editedPath, scale),
+                    )
+                }
+                showRouteEditor = false
+            },
             onDismissRequest = { showRouteEditor = false },
         )
     }
@@ -2848,7 +2889,6 @@ private fun AlternativeRoutesDialog(
                 Text(
                     text = stringResource(R.string.alternative_routes),
                     style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -2932,6 +2972,7 @@ private fun AlternativeRoutesDialog(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                HorizontalDivider()
                 Text(
                     stringResource(
                         R.string.generate_alternatives_after_point,
@@ -2955,7 +2996,7 @@ private fun AlternativeRoutesDialog(
                 OutlinedTextField(
                     value = countText,
                     onValueChange = { countText = it.filter(Char::isDigit).take(2) },
-                    label = { Text(stringResource(R.string.number_of_routes), color = Color.White) },
+                    label = { Text(stringResource(R.string.number_of_routes)) },
                     supportingText = { Text(stringResource(R.string.number_of_routes_range)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
@@ -2972,7 +3013,6 @@ private fun AlternativeRoutesDialog(
                         Text(
                             stringResource(R.string.use_relative_values),
                             style = MaterialTheme.typography.labelLarge,
-                            color = Color.White,
                         )
                     }
                     Switch(
@@ -2985,7 +3025,6 @@ private fun AlternativeRoutesDialog(
                 Text(
                     stringResource(R.string.distance_bounds),
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
                 )
                 AlternativeCriterionField(
                     value = minDistanceText,
@@ -3011,7 +3050,6 @@ private fun AlternativeRoutesDialog(
                 Text(
                     stringResource(R.string.score_bounds),
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
                 )
                 AlternativeCriterionField(
                     value = minScoreText,
@@ -3100,7 +3138,7 @@ private fun AlternativeCriterionField(
             }
             onValueChange(allowed.take(10))
         },
-        label = { Text(label, maxLines = 2, color = Color.White) },
+        label = { Text(label, maxLines = 2) },
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Decimal,
         ),
@@ -3179,6 +3217,8 @@ private fun SettingsDialog(
     onUpdateTheme: (ThemeConfig) -> Unit,
     onUpdateLanguage: (LanguageConfig) -> Unit,
     onUpdateAnimations: (Boolean) -> Unit,
+    onUpdateMapRotationGestures: (Boolean) -> Unit,
+    onUpdatePointsPerKilometer: (Boolean) -> Unit,
     onUpdateUsageTips: (Boolean) -> Unit,
     onClearAllSavedMaps: () -> Unit,
     hasSavedMaps: Boolean,
@@ -3223,7 +3263,36 @@ private fun SettingsDialog(
                         modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
                     )
                 }
-                HorizontalDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        stringResource(R.string.map_rotation),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Switch(
+                        checked = preferences.enableMapRotationGestures,
+                        onCheckedChange = onUpdateMapRotationGestures,
+                        modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        stringResource(R.string.points_per_kilometer),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    Switch(
+                        checked = preferences.showPointsPerKilometer,
+                        onCheckedChange = onUpdatePointsPerKilometer,
+                        modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,

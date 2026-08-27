@@ -27,6 +27,28 @@ class PreferencesRepositoryTest {
     }
 
     @Test
+    fun pointsPerKilometerIsOffByDefaultAndCanBeEnabled() = runBlocking {
+        val repository = PreferencesRepository(FakeDataStore(mutablePreferencesOf()))
+
+        assertFalse(repository.userPreferencesFlow.first().showPointsPerKilometer)
+
+        repository.updatePointsPerKilometer(true)
+
+        assertEquals(true, repository.userPreferencesFlow.first().showPointsPerKilometer)
+    }
+
+    @Test
+    fun mapRotationGesturesAreOnByDefaultAndCanBeDisabled() = runBlocking {
+        val repository = PreferencesRepository(FakeDataStore(mutablePreferencesOf()))
+
+        assertEquals(true, repository.userPreferencesFlow.first().enableMapRotationGestures)
+
+        repository.updateMapRotationGestures(false)
+
+        assertFalse(repository.userPreferencesFlow.first().enableMapRotationGestures)
+    }
+
+    @Test
     fun unknownEnumValuesFallBackToDefaults() = runBlocking {
         val preferences = mutablePreferencesOf(
             stringPreferencesKey("theme_config") to "REMOVED_THEME",

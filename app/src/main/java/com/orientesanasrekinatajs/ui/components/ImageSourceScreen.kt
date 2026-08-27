@@ -100,6 +100,7 @@ fun ImageSourceScreen(
                 Text(
                     text = stringResource(R.string.image_source_title),
                     style = MaterialTheme.typography.headlineMedium,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier.onSizeChanged { titleWidthPixels = it.width },
                 )
                 Spacer(Modifier.height(10.dp))

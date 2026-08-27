@@ -33,6 +33,12 @@ sealed interface RouteManagementAction {
     ) : RouteManagementAction
 
     data class Select(val routeId: String) : RouteManagementAction
+
+    data class UpdatePath(
+        val routeId: String,
+        val path: List<ControlPoint>,
+        val pixelsPerMeter: Float,
+    ) : RouteManagementAction
 }
 
 sealed interface RouteRestrictionAction {
@@ -286,6 +292,20 @@ class RoutingViewModel internal constructor(
                 _uiState.value = current.copy(
                     selectedRoutePointIds = selected.path.map(ControlPoint::id),
                     selectedRouteId = selected.id,
+                )
+            }
+            is RouteManagementAction.UpdatePath -> {
+                val existing = routes.firstOrNull { it.id == action.routeId } ?: return
+                if (action.path.size < 2 || action.pixelsPerMeter <= 0f ||
+                    !action.pixelsPerMeter.isFinite()
+                ) return
+                val matrix = DistanceMatrix(action.path.distinctBy(ControlPoint::id), action.pixelsPerMeter)
+                val updated = assembleRoute(action.path, matrix).copy(id = existing.id)
+                publishManagedRoutes(
+                    routes = routes.map { candidate ->
+                        if (candidate.id == existing.id) updated else candidate
+                    },
+                    metadata = current.routeMetadata,
                 )
             }
         }
