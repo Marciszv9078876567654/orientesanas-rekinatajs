@@ -100,6 +100,7 @@ class MainActivity : AppCompatActivity() {
                     onManageRoutes = routingViewModel::manageRoutes,
                     onManageRouteRestrictions = routingViewModel::manageRouteRestrictions,
                     onExportMap = mapTransferViewModel::export,
+                    onExportPdf = mapTransferViewModel::exportPdf,
                     onImportMap = { uri ->
                         mapTransferViewModel.import(uri) { imported ->
                             routingViewModel.reset()

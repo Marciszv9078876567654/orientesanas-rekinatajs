@@ -8,12 +8,13 @@ import androidx.lifecycle.viewModelScope
 import com.orientesanasrekinatajs.data.local.SavedMap
 import com.orientesanasrekinatajs.data.local.SavedMapDraft
 import com.orientesanasrekinatajs.data.transfer.MapTransferRepository
+import com.orientesanasrekinatajs.data.transfer.PdfMapDraft
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-enum class MapTransferEvent { EXPORTED, EXPORT_FAILED, IMPORT_FAILED }
+enum class MapTransferEvent { EXPORTED, PDF_EXPORTED, EXPORT_FAILED, IMPORT_FAILED }
 
 data class MapTransferUiState(
     val isWorking: Boolean = false,
@@ -33,6 +34,18 @@ class MapTransferViewModel(
             _uiState.value = runCatching { repository.export(uri, draft, includeRoutes) }
                 .fold(
                     onSuccess = { MapTransferUiState(event = MapTransferEvent.EXPORTED) },
+                    onFailure = { MapTransferUiState(event = MapTransferEvent.EXPORT_FAILED) },
+                )
+        }
+    }
+
+    fun exportPdf(uri: Uri, draft: PdfMapDraft) {
+        if (_uiState.value.isWorking) return
+        viewModelScope.launch {
+            _uiState.value = MapTransferUiState(isWorking = true)
+            _uiState.value = runCatching { repository.exportPdf(uri, draft) }
+                .fold(
+                    onSuccess = { MapTransferUiState(event = MapTransferEvent.PDF_EXPORTED) },
                     onFailure = { MapTransferUiState(event = MapTransferEvent.EXPORT_FAILED) },
                 )
         }

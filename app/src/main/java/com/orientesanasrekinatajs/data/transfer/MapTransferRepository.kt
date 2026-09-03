@@ -4,6 +4,11 @@ import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.DashPathEffect
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import com.orientesanasrekinatajs.data.local.SavedMap
 import com.orientesanasrekinatajs.data.local.SavedMapDraft
@@ -23,8 +28,27 @@ import kotlin.math.hypot
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import org.json.JSONArray
 import org.json.JSONObject
+
+data class PdfRouteLayer(
+    val points: List<ControlPoint>,
+    val colorIndex: Int,
+    val isActive: Boolean,
+    val isPinned: Boolean,
+    val strokeWidth: Float = 4f,
+)
+
+data class PdfMapDraft(
+    val bitmap: Bitmap,
+    val points: List<ControlPoint>,
+    val routes: List<PdfRouteLayer>,
+    val rotationDegrees: Float,
+    val imageQuality: Int = 80,
+)
 
 class MapTransferRepository(
     private val contentResolver: ContentResolver,
@@ -46,6 +70,233 @@ class MapTransferRepository(
                 }
             } ?: error("Could not open the export destination")
         }
+
+    suspend fun exportPdf(uri: Uri, draft: PdfMapDraft) = withContext(ioDispatcher) {
+        val radians = Math.toRadians(draft.rotationDegrees.toDouble())
+        val imageWidth = draft.bitmap.width * abs(cos(radians)).toFloat() +
+            draft.bitmap.height * abs(sin(radians)).toFloat()
+        val imageHeight = draft.bitmap.width * abs(sin(radians)).toFloat() +
+            draft.bitmap.height * abs(cos(radians)).toFloat()
+        val pageScale = minOf(1f, PDF_MAX_DIMENSION / maxOf(
+            imageWidth,
+            imageHeight,
+        ))
+        val pageWidth = (imageWidth * pageScale).toInt().coerceAtLeast(1)
+        val pageHeight = (imageHeight * pageScale).toInt().coerceAtLeast(1)
+        val pdfBitmap = compressedPdfBitmap(draft.bitmap, draft.imageQuality, pageScale)
+        val document = PdfDocument()
+        try {
+            val page = document.startPage(
+                PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create(),
+            )
+            drawPdfMap(page.canvas, draft, pdfBitmap, imageWidth, imageHeight, pageScale)
+            document.finishPage(page)
+            contentResolver.openOutputStream(uri, "w")?.use(document::writeTo)
+                ?: error("Could not open the PDF destination")
+        } finally {
+            document.close()
+            pdfBitmap.recycle()
+        }
+    }
+
+    private fun compressedPdfBitmap(source: Bitmap, quality: Int, pageScale: Float): Bitmap {
+        val safeQuality = quality.coerceIn(MIN_PDF_QUALITY, 100)
+        val qualityScale = 0.35f + safeQuality / 100f * 0.65f
+        val bitmapScale = minOf(1f, pageScale * qualityScale)
+        val scaled = Bitmap.createScaledBitmap(
+            source,
+            (source.width * bitmapScale).toInt().coerceAtLeast(1),
+            (source.height * bitmapScale).toInt().coerceAtLeast(1),
+            true,
+        )
+        val opaque = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+        Canvas(opaque).run {
+            drawColor(Color.WHITE)
+            drawBitmap(scaled, 0f, 0f, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        }
+        if (scaled !== source) scaled.recycle()
+        val encoded = ByteArrayOutputStream()
+        check(opaque.compress(Bitmap.CompressFormat.JPEG, safeQuality, encoded)) {
+            "Could not compress the PDF map image"
+        }
+        opaque.recycle()
+        return requireNotNull(
+            BitmapFactory.decodeByteArray(encoded.toByteArray(), 0, encoded.size()),
+        ) { "Could not decode the compressed PDF map image" }
+    }
+
+    private fun drawPdfMap(
+        canvas: Canvas,
+        draft: PdfMapDraft,
+        mapBitmap: Bitmap,
+        pageWidth: Float,
+        pageHeight: Float,
+        pageScale: Float,
+    ) {
+        canvas.drawColor(Color.WHITE)
+        canvas.save()
+        canvas.scale(pageScale, pageScale)
+        val offsetX = (pageWidth - draft.bitmap.width) / 2f
+        val offsetY = (pageHeight - draft.bitmap.height) / 2f
+        val centerX = pageWidth / 2f
+        val centerY = pageHeight / 2f
+        val visualScale = 1f / pageScale
+
+        canvas.save()
+        canvas.rotate(draft.rotationDegrees, centerX, centerY)
+        canvas.drawBitmap(
+            mapBitmap,
+            null,
+            android.graphics.RectF(
+                offsetX,
+                offsetY,
+                offsetX + draft.bitmap.width,
+                offsetY + draft.bitmap.height,
+            ),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+        )
+        draft.routes.filter { it.isActive }.forEach { layer ->
+            drawPdfRoute(
+                canvas, layer, offsetX, offsetY, 1f, 7f * visualScale,
+                dashScale = visualScale, dashed = false,
+            )
+        }
+        draft.routes.filter { it.isPinned && !it.isActive }.asReversed().forEach { layer ->
+            drawPdfRoute(
+                canvas, layer, offsetX, offsetY, 1f, layer.strokeWidth * visualScale,
+                dashScale = visualScale, dashed = true,
+            )
+        }
+        canvas.restore()
+
+        val visitedIds = draft.routes.flatMap(PdfRouteLayer::points).mapTo(mutableSetOf()) { it.id }
+        val highlightedColors = buildMap {
+            draft.routes.filter(PdfRouteLayer::isActive).forEach { layer ->
+                layer.points.forEach { put(it.id, routeColor(layer.colorIndex)) }
+            }
+            draft.routes.filter(PdfRouteLayer::isPinned).forEach { layer ->
+                layer.points.forEach { put(it.id, routeColor(layer.colorIndex)) }
+            }
+        }
+        draft.points.forEach { point ->
+            val screen = transformedPoint(
+                offsetX + point.center.x,
+                offsetY + point.center.y,
+                centerX,
+                centerY,
+                draft.rotationDegrees,
+                1f,
+                0f,
+                0f,
+            )
+            val muted = point.id !in visitedIds
+            val markerColor = if (!muted && point.type == ControlPointType.CONTROL) {
+                highlightedColors[point.id] ?: typeColor(point.type)
+            } else if (muted) Color.rgb(122, 122, 122) else typeColor(point.type)
+            val pointScale = visualScale
+            val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                alpha = if (muted) 166 else 255
+            }
+            canvas.drawCircle(screen.first, screen.second, 13f * pointScale, fill)
+            fill.color = markerColor
+            fill.alpha = 255
+            canvas.drawCircle(screen.first, screen.second, 9f * pointScale, fill)
+            val label = when (point.type) {
+                ControlPointType.START -> "S"
+                ControlPointType.FINISH -> "F"
+                ControlPointType.START_FINISH -> "S/F"
+                ControlPointType.CONTROL -> point.code.toString()
+            }
+            val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(0, 73, 87)
+                textSize = 18f * pointScale
+                isFakeBoldText = true
+                alpha = if (muted) 125 else 255
+            }
+            val outline = Paint(labelPaint).apply {
+                color = Color.WHITE
+                style = Paint.Style.STROKE
+                strokeWidth = 3f
+                alpha = if (muted) 150 else 255
+            }
+            val labelX = screen.first + 13f * pointScale
+            val labelY = screen.second - 10f * pointScale
+            canvas.drawText(label, labelX, labelY, outline)
+            canvas.drawText(label, labelX, labelY, labelPaint)
+        }
+        canvas.restore()
+    }
+
+    private fun drawPdfRoute(
+        canvas: Canvas,
+        layer: PdfRouteLayer,
+        offsetX: Float,
+        offsetY: Float,
+        scale: Float,
+        strokeWidth: Float,
+        dashScale: Float,
+        dashed: Boolean,
+    ) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = routeColor(layer.colorIndex)
+            style = Paint.Style.STROKE
+            this.strokeWidth = strokeWidth
+            strokeCap = Paint.Cap.ROUND
+            if (dashed) {
+                alpha = 209
+                pathEffect = DashPathEffect(
+                    when (layer.colorIndex.mod(4)) {
+                        0 -> floatArrayOf(18f, 12f)
+                        1 -> floatArrayOf(2f, 10f)
+                        2 -> floatArrayOf(18f, 8f, 2f, 8f)
+                        else -> floatArrayOf(28f, 10f)
+                    }.map { it * dashScale }.toFloatArray(),
+                    0f,
+                )
+            }
+        }
+        layer.points.zipWithNext().forEach { (start, end) ->
+            canvas.drawLine(
+                offsetX + start.center.x * scale,
+                offsetY + start.center.y * scale,
+                offsetX + end.center.x * scale,
+                offsetY + end.center.y * scale,
+                paint,
+            )
+        }
+    }
+
+    private fun transformedPoint(
+        x: Float,
+        y: Float,
+        centerX: Float,
+        centerY: Float,
+        degrees: Float,
+        zoom: Float,
+        panX: Float,
+        panY: Float,
+    ): Pair<Float, Float> {
+        val radians = Math.toRadians(degrees.toDouble())
+        val dx = x - centerX
+        val dy = y - centerY
+        val rotatedX = dx * cos(radians).toFloat() - dy * sin(radians).toFloat()
+        val rotatedY = dx * sin(radians).toFloat() + dy * cos(radians).toFloat()
+        return centerX + rotatedX * zoom + panX to centerY + rotatedY * zoom + panY
+    }
+
+    private fun typeColor(type: ControlPointType): Int = when (type) {
+        ControlPointType.START -> Color.rgb(46, 125, 50)
+        ControlPointType.FINISH -> Color.rgb(198, 40, 40)
+        ControlPointType.START_FINISH -> Color.rgb(106, 27, 154)
+        ControlPointType.CONTROL -> Color.rgb(233, 30, 99)
+    }
+
+    private fun routeColor(index: Int): Int = intArrayOf(
+        0xFF1565C0.toInt(), 0xFFD81B60.toInt(), 0xFF00897B.toInt(), 0xFFF57C00.toInt(),
+        0xFF7B1FA2.toInt(), 0xFF00ACC1.toInt(), 0xFF558B2F.toInt(), 0xFFE64A19.toInt(),
+        0xFF5E35B1.toInt(), 0xFFC0A000.toInt(),
+    )[index.mod(10)]
 
     suspend fun import(uri: Uri): SavedMap = withContext(ioDispatcher) {
         var manifestBytes: ByteArray? = null
@@ -263,6 +514,9 @@ class MapTransferRepository(
     companion object {
         const val FILE_EXTENSION = "ormap"
         const val MIME_TYPE = "application/zip"
+        const val PDF_MIME_TYPE = "application/pdf"
+        private const val PDF_MAX_DIMENSION = 2_000f
+        private const val MIN_PDF_QUALITY = 10
         private const val FORMAT_NAME = "orienteering-map"
         private const val FORMAT_VERSION = 1
         private const val MANIFEST_ENTRY = "manifest.json"

@@ -39,6 +39,11 @@ sealed interface RouteManagementAction {
         val path: List<ControlPoint>,
         val pixelsPerMeter: Float,
     ) : RouteManagementAction
+
+    data class CreateEmpty(
+        val points: List<ControlPoint>,
+        val pixelsPerMeter: Float,
+    ) : RouteManagementAction
 }
 
 sealed interface RouteRestrictionAction {
@@ -56,6 +61,8 @@ data class AlternativeRouteCriteria(
     val minScore: Int? = null,
     val maxScore: Int? = null,
     val useRelativeValues: Boolean = false,
+    val useRelativeDistanceValues: Boolean = false,
+    val useRelativeScoreValues: Boolean = false,
     val fixedPrefixPointCount: Int = 1,
 )
 
@@ -308,6 +315,43 @@ class RoutingViewModel internal constructor(
                     metadata = current.routeMetadata,
                 )
             }
+            is RouteManagementAction.CreateEmpty -> {
+                if (!action.pixelsPerMeter.isFinite() || action.pixelsPerMeter <= 0f) return
+                val combinedEndpoints = action.points.filter {
+                    it.type == ControlPointType.START_FINISH
+                }
+                val start = action.points.filter { it.type == ControlPointType.START }
+                    .ifEmpty { combinedEndpoints }
+                    .singleOrNull() ?: return
+                val finish = action.points.filter { it.type == ControlPointType.FINISH }
+                    .ifEmpty { combinedEndpoints }
+                    .singleOrNull() ?: return
+                val endpointPath = listOf(start, finish)
+                val emptyRoute = assembleRoute(
+                    path = endpointPath,
+                    matrix = DistanceMatrix(endpointPath.distinctBy(ControlPoint::id), action.pixelsPerMeter),
+                )
+                val orderedRoutes = routes + emptyRoute
+                val name = nextRouteName(routes.mapIndexed { index, existingRoute ->
+                    current.routeMetadata[existingRoute.id]?.name?.takeIf(String::isNotBlank)
+                        ?: defaultRouteName(index)
+                })
+                val metadata = current.routeMetadata + (emptyRoute.id to RouteMetadata(
+                    name = name,
+                    order = orderedRoutes.lastIndex,
+                    isDisplayed = false,
+                    colorIndex = nextColorIndex(current.routeMetadata),
+                ))
+                publishRoutes(
+                    routes = orderedRoutes,
+                    primary = current.route ?: emptyRoute,
+                    selected = emptyRoute,
+                    metadata = metadata,
+                    mode = current.mode,
+                    budgetMeters = current.budgetMeters,
+                    targetScore = current.targetScore,
+                )
+            }
         }
     }
 
@@ -486,28 +530,30 @@ class RoutingViewModel internal constructor(
         require(criteria.count in 1..MAX_ALTERNATIVE_ROUTES) {
             "Alternative route count must be between 1 and $MAX_ALTERNATIVE_ROUTES"
         }
+        val relativeDistanceValues = criteria.useRelativeValues || criteria.useRelativeDistanceValues
+        val relativeScoreValues = criteria.useRelativeValues || criteria.useRelativeScoreValues
         val minDistance = criteria.minDistanceMeters.resolveMinimumRelativeTo(
             primary.totalDistanceMeters,
-            criteria.useRelativeValues,
+            relativeDistanceValues,
         )
         val maxDistance = criteria.maxDistanceMeters.resolveMaximumRelativeTo(
             primary.totalDistanceMeters,
-            criteria.useRelativeValues,
+            relativeDistanceValues,
         )
         val minScore = criteria.minScore.resolveMinimumRelativeTo(
             primary.totalScore,
-            criteria.useRelativeValues,
+            relativeScoreValues,
         )
         val maxScore = criteria.maxScore.resolveMaximumRelativeTo(
             primary.totalScore,
-            criteria.useRelativeValues,
+            relativeScoreValues,
         )
-        if (criteria.useRelativeValues) {
-            require(
-                listOfNotNull(criteria.minDistanceMeters, criteria.maxDistanceMeters).all { it >= 0f } &&
-                    listOfNotNull(criteria.minScore, criteria.maxScore).all { it >= 0 },
-            ) { "Relative bounds must be non-negative" }
-        }
+        if (relativeDistanceValues) require(
+            listOfNotNull(criteria.minDistanceMeters, criteria.maxDistanceMeters).all { it >= 0f },
+        ) { "Relative distance bounds must be non-negative" }
+        if (relativeScoreValues) require(
+            listOfNotNull(criteria.minScore, criteria.maxScore).all { it >= 0 },
+        ) { "Relative score bounds must be non-negative" }
         require(minDistance == null || maxDistance == null || minDistance <= maxDistance) {
             "Minimum distance cannot exceed maximum distance"
         }

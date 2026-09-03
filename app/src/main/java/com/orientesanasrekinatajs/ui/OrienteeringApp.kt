@@ -7,6 +7,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +44,7 @@ import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DeleteForever
@@ -130,6 +135,8 @@ import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
 import com.orientesanasrekinatajs.data.local.SavedMapDraft
 import com.orientesanasrekinatajs.data.transfer.MapTransferRepository
+import com.orientesanasrekinatajs.data.transfer.PdfMapDraft
+import com.orientesanasrekinatajs.data.transfer.PdfRouteLayer
 import com.orientesanasrekinatajs.domain.model.ControlPoint
 import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.LanguageConfig
@@ -146,10 +153,13 @@ import com.orientesanasrekinatajs.ui.components.ImageSourceScreen
 import com.orientesanasrekinatajs.ui.components.InteractiveCornerCanvas
 import com.orientesanasrekinatajs.ui.components.InteractiveControlPointCanvas
 import com.orientesanasrekinatajs.ui.components.RouteDetailsBottomSheet
+import com.orientesanasrekinatajs.ui.components.RouteDetailsPanelState
 import com.orientesanasrekinatajs.ui.components.RouteEditorBottomSheet
+import com.orientesanasrekinatajs.ui.components.RouteEditorPanelState
 import com.orientesanasrekinatajs.ui.components.RouteRenderingCanvas
 import com.orientesanasrekinatajs.ui.components.RouteRenderLayer
 import com.orientesanasrekinatajs.ui.components.routeColor
+import com.orientesanasrekinatajs.ui.components.pinnedRouteStrokeWidth
 import com.orientesanasrekinatajs.ui.processing.MapProcessingStage
 import com.orientesanasrekinatajs.ui.processing.MapProcessingUiState
 import com.orientesanasrekinatajs.ui.routing.RouteMode
@@ -165,6 +175,7 @@ import com.orientesanasrekinatajs.ui.transfer.MapTransferUiState
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.hypot
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 @Composable
@@ -192,6 +203,7 @@ fun OrienteeringApp(
     onManageRoutes: (RouteManagementAction) -> Unit,
     onManageRouteRestrictions: (RouteRestrictionAction) -> Unit,
     onExportMap: (Uri, SavedMapDraft, Boolean) -> Unit,
+    onExportPdf: (Uri, PdfMapDraft) -> Unit,
     onImportMap: (Uri) -> Unit,
     onSaveMap: (SavedMapDraft, (ScannedMapEntity) -> Unit) -> Unit,
     onLoadSavedMap: (String) -> Unit,
@@ -230,7 +242,7 @@ fun OrienteeringApp(
         }
     }
     val snapMapRotation: () -> Unit = {
-        mapRotation = ((mapRotation * 90f + mapRotationOffsetDegrees) / 90f).roundToInt()
+        mapRotation = nearestQuarterTurn(mapRotation, mapRotationOffsetDegrees)
         mapRotationOffsetDegrees = 0f
     }
     val setMapRotation: (Int) -> Unit = { quarterTurns ->
@@ -294,6 +306,7 @@ fun OrienteeringApp(
                     onManageRoutes = onManageRoutes,
                     onManageRouteRestrictions = onManageRouteRestrictions,
                     onExportMap = onExportMap,
+                    onExportPdf = onExportPdf,
                     onSaveMap = onSaveMap,
                     onRenameSavedMap = onRenameSavedMap,
                     onDeleteSavedMap = onDeleteSavedMap,
@@ -367,12 +380,15 @@ fun OrienteeringApp(
     mapTransferState.event?.let { event ->
         MessageDialog(
             title = stringResource(
-                if (event == MapTransferEvent.EXPORTED) R.string.map_exported_title
+                if (event == MapTransferEvent.EXPORTED || event == MapTransferEvent.PDF_EXPORTED) {
+                    R.string.map_exported_title
+                }
                 else R.string.map_transfer_error_title,
             ),
             message = stringResource(
                 when (event) {
                     MapTransferEvent.EXPORTED -> R.string.map_exported_message
+                    MapTransferEvent.PDF_EXPORTED -> R.string.pdf_exported_message
                     MapTransferEvent.EXPORT_FAILED -> R.string.map_export_failed
                     MapTransferEvent.IMPORT_FAILED -> R.string.map_import_failed
                 },
@@ -476,7 +492,9 @@ private fun ManualBoundaryScreen(
                 modifier = Modifier.fillMaxSize(),
             )
             MapOverlayButtons(
-                onRotate = { onRotationChange(rotation + 1) },
+                onRotate = {
+                    onRotationChange(nextClockwiseQuarterTurn(rotation, rotationOffsetDegrees))
+                },
                 onRecenter = { onSnapRotation(); recenterKey++ },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
@@ -509,6 +527,20 @@ internal fun initialBoundary(bitmap: Bitmap): MapBoundary {
 
 private enum class MapPage { EDIT, ROUTE }
 private enum class EditMode { CALIBRATION, CORNERS, POINTS }
+private enum class RouteLeadingAction { HOME, CLOSE_DETAILS, CANCEL_EDIT }
+
+/** Returns the next cardinal orientation strictly clockwise from the current angle. */
+internal fun nextClockwiseQuarterTurn(
+    rotationQuarterTurns: Int,
+    rotationOffsetDegrees: Float,
+): Int = floor((rotationQuarterTurns * 90f + rotationOffsetDegrees) / 90f + 0.0001f)
+    .toInt() + 1
+
+/** Chooses the cardinal orientation closest to the current free-rotation angle. */
+internal fun nearestQuarterTurn(
+    rotationQuarterTurns: Int,
+    rotationOffsetDegrees: Float,
+): Int = ((rotationQuarterTurns * 90f + rotationOffsetDegrees) / 90f).roundToInt()
 
 @Composable
 private fun MapFlowScreen(
@@ -529,6 +561,7 @@ private fun MapFlowScreen(
     onManageRoutes: (RouteManagementAction) -> Unit,
     onManageRouteRestrictions: (RouteRestrictionAction) -> Unit,
     onExportMap: (Uri, SavedMapDraft, Boolean) -> Unit,
+    onExportPdf: (Uri, PdfMapDraft) -> Unit,
     onSaveMap: (SavedMapDraft, (ScannedMapEntity) -> Unit) -> Unit,
     onRenameSavedMap: (String, String, (ScannedMapEntity) -> Unit) -> Unit,
     onDeleteSavedMap: (String, () -> Unit) -> Unit,
@@ -614,7 +647,7 @@ private fun MapFlowScreen(
                 lineStart = lineStart,
                 lineEnd = lineEnd,
                 lineDistanceMeters = lineMeters,
-                rotationQuarterTurns = ((rotation * 90f + rotationOffsetDegrees) / 90f).roundToInt(),
+                rotationQuarterTurns = nearestQuarterTurn(rotation, rotationOffsetDegrees),
                 existingId = existingId,
                 name = name,
             )
@@ -622,6 +655,7 @@ private fun MapFlowScreen(
     }
     var showExportOptions by rememberSaveable { mutableStateOf(false) }
     var pendingExportIncludesRoutes by rememberSaveable { mutableStateOf(false) }
+    var pendingPdfQuality by rememberSaveable { mutableIntStateOf(80) }
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(MapTransferRepository.MIME_TYPE),
     ) { uri ->
@@ -637,6 +671,65 @@ private fun MapFlowScreen(
             )?.let { draft ->
                 onExportMap(destination, draft, pendingExportIncludesRoutes)
             }
+        }
+    }
+    val pdfExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(MapTransferRepository.PDF_MIME_TYPE),
+    ) { uri ->
+        if (uri != null) {
+            val higherScoreRoutes = routingState.alternativeRoutes.take(
+                routingState.nextLongestRouteCount,
+            )
+            val lowerScoreRoutes = routingState.alternativeRoutes.drop(
+                routingState.nextLongestRouteCount,
+            )
+            val availableRoutes = higherScoreRoutes + listOfNotNull(routingState.route) +
+                lowerScoreRoutes
+            val selectableRoutes = availableRoutes.filterNot { candidate ->
+                routingState.routeMetadata[candidate.id]?.isHidden == true
+            }
+            val activeRouteId = routingState.selectedRouteId
+                ?.takeIf { id -> selectableRoutes.any { it.id == id } }
+                ?: selectableRoutes.firstOrNull { candidate ->
+                    candidate.path.map(ControlPoint::id) == routingState.selectedRoutePointIds
+                }?.id
+                ?: selectableRoutes.firstOrNull()?.id
+            val portrayedCandidates = availableRoutes.mapNotNull { candidate ->
+                val metadata = routingState.routeMetadata[candidate.id] ?: RouteMetadata()
+                val isActive = candidate.id == activeRouteId
+                if (!isActive && !metadata.isDisplayed) return@mapNotNull null
+                candidate to metadata
+            }
+            val pinnedCandidateIds = portrayedCandidates.mapNotNull { (candidate, _) ->
+                candidate.id.takeUnless { it == activeRouteId }
+            }
+            val portrayedRoutes = portrayedCandidates.map { (candidate, metadata) ->
+                val isActive = candidate.id == activeRouteId
+                PdfRouteLayer(
+                    points = candidate.path,
+                    colorIndex = metadata.colorIndex,
+                    isActive = isActive,
+                    isPinned = !isActive,
+                    strokeWidth = if (isActive) {
+                        7f
+                    } else {
+                        pinnedRouteStrokeWidth(
+                            pinnedCandidateIds.indexOf(candidate.id),
+                            pinnedCandidateIds.size,
+                        )
+                    },
+                )
+            }
+            onExportPdf(
+                uri,
+                PdfMapDraft(
+                    bitmap = rectified,
+                    points = processingState.controlPoints,
+                    routes = portrayedRoutes,
+                    rotationDegrees = rotation * 90f + rotationOffsetDegrees,
+                    imageQuality = pendingPdfQuality,
+                ),
+            )
         }
     }
     val requestExport: () -> Unit = { showExportOptions = true }
@@ -678,7 +771,7 @@ private fun MapFlowScreen(
             rotationGesturesEnabled = rotationGesturesEnabled,
             onRotationGesture = { change -> isDirty = true; onRotationGesture(change) },
             onSnapRotation = { isDirty = true; onSnapRotation() },
-            onRotationChange = { isDirty = true; onRotationChange(it) },
+            onRotationChange = onRotationChange,
             canSave = effectivePixelsPerMeter != null,
             isSaving = isSavingMap,
             isExporting = isTransferringMap,
@@ -801,12 +894,7 @@ private fun MapFlowScreen(
             rotationGesturesEnabled = rotationGesturesEnabled,
             onRotationGesture = { change -> isDirty = true; onRotationGesture(change) },
             onSnapRotation = { isDirty = true; onSnapRotation() },
-            onRotationChange = {
-                isDirty = true
-                mapEditChangedSinceEntry = true
-                onInvalidateRoute()
-                onRotationChange(it)
-            },
+            onRotationChange = onRotationChange,
             onCancel = if (editOpenedFromRoute) {
                 {
                     awaitingRouteGeneration = false
@@ -838,14 +926,19 @@ private fun MapFlowScreen(
         ExportMapDialog(
             hasRoutes = routingState.route != null || routingState.alternativeRoutes.isNotEmpty(),
             isExporting = isTransferringMap,
-            onExport = { includeRoutes ->
+            onExport = { exportAsPdf, includeRoutes, pdfQuality ->
                 pendingExportIncludesRoutes = includeRoutes
+                pendingPdfQuality = pdfQuality
                 showExportOptions = false
                 val baseName = (savedMapName?.takeIf(String::isNotBlank) ?: defaultRouteName)
                     .replace(Regex("[^A-Za-z0-9._ -]"), "_")
                     .trim()
                     .ifBlank { "map" }
-                exportLauncher.launch("$baseName.${MapTransferRepository.FILE_EXTENSION}")
+                if (exportAsPdf) {
+                    pdfExportLauncher.launch("$baseName.pdf")
+                } else {
+                    exportLauncher.launch("$baseName.${MapTransferRepository.FILE_EXTENSION}")
+                }
             },
             onDismiss = { showExportOptions = false },
         )
@@ -856,10 +949,12 @@ private fun MapFlowScreen(
 private fun ExportMapDialog(
     hasRoutes: Boolean,
     isExporting: Boolean,
-    onExport: (Boolean) -> Unit,
+    onExport: (Boolean, Boolean, Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var includeRoutes by rememberSaveable(hasRoutes) { mutableStateOf(hasRoutes) }
+    var exportAsPdf by rememberSaveable { mutableStateOf(false) }
+    var pdfQuality by rememberSaveable { mutableFloatStateOf(80f) }
     AlertDialog(
         onDismissRequest = { if (!isExporting) onDismiss() },
         title = { CenteredDialogTitle(stringResource(R.string.export_map)) },
@@ -871,16 +966,51 @@ private fun ExportMapDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(stringResource(R.string.include_all_routes), modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.export_as_pdf), modifier = Modifier.weight(1f))
                     Switch(
-                        checked = includeRoutes,
-                        onCheckedChange = { includeRoutes = it },
-                        enabled = hasRoutes && !isExporting,
+                        checked = exportAsPdf,
+                        onCheckedChange = { exportAsPdf = it },
+                        enabled = !isExporting,
                     )
+                }
+                if (exportAsPdf) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(stringResource(R.string.pdf_image_quality))
+                            Text(stringResource(R.string.pdf_quality_format, pdfQuality.roundToInt()))
+                        }
+                        Slider(
+                            value = pdfQuality,
+                            onValueChange = { pdfQuality = it },
+                            valueRange = 10f..100f,
+                            steps = 8,
+                            enabled = !isExporting,
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            stringResource(R.string.include_all_routes),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = includeRoutes,
+                            onCheckedChange = { includeRoutes = it },
+                            enabled = hasRoutes && !isExporting,
+                        )
+                    }
                 }
                 Text(
                     stringResource(
-                        if (includeRoutes && hasRoutes) R.string.export_map_and_routes_description
+                        if (exportAsPdf) R.string.export_pdf_description
+                        else if (includeRoutes && hasRoutes) R.string.export_map_and_routes_description
                         else R.string.export_map_only_description,
                     ),
                     style = MaterialTheme.typography.bodySmall,
@@ -889,7 +1019,16 @@ private fun ExportMapDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onExport(includeRoutes && hasRoutes) }, enabled = !isExporting) {
+            TextButton(
+                onClick = {
+                    onExport(
+                        exportAsPdf,
+                        !exportAsPdf && includeRoutes && hasRoutes,
+                        pdfQuality.roundToInt(),
+                    )
+                },
+                enabled = !isExporting,
+            ) {
                 Text(stringResource(R.string.export))
             }
         },
@@ -1105,7 +1244,9 @@ private fun EditMapScreen(
                     )
                 }
                 MapOverlayButtons(
-                    onRotate = { onRotationChange(rotation + 1) },
+                    onRotate = {
+                        onRotationChange(nextClockwiseQuarterTurn(rotation, rotationOffsetDegrees))
+                    },
                     onRecenter = { onSnapRotation(); recenterKey++ },
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 )
@@ -1540,6 +1681,7 @@ private fun RouteScreen(
     onManageRouteRestrictions: (RouteRestrictionAction) -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
+    val animationsEnabled = LocalAnimationsEnabled.current
     val density = LocalDensity.current
     val routeMenuGapPx = with(density) { 16.dp.roundToPx() }
     val routeMenuPositionProvider = remember(routeMenuGapPx) {
@@ -1562,6 +1704,9 @@ private fun RouteScreen(
         }
     }
     var showDetails by rememberSaveable { mutableStateOf(false) }
+    var routeDetailsPanelState by rememberSaveable {
+        mutableStateOf(RouteDetailsPanelState.HALF)
+    }
     var recenterKey by rememberSaveable { mutableIntStateOf(0) }
     var showRename by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -1571,6 +1716,12 @@ private fun RouteScreen(
     var showMapActions by rememberSaveable { mutableStateOf(false) }
     var showRouteMenu by rememberSaveable { mutableStateOf(false) }
     var showRouteEditor by rememberSaveable { mutableStateOf(false) }
+    var routeEditorPanelState by rememberSaveable {
+        mutableStateOf(RouteEditorPanelState.HALF)
+    }
+    var routeEditorPath by remember { mutableStateOf<List<ControlPoint>?>(null) }
+    var confirmRouteEditSave by rememberSaveable { mutableStateOf(false) }
+    var confirmRouteEditCancel by rememberSaveable { mutableStateOf(false) }
     var showRouteRestrictions by rememberSaveable { mutableStateOf(false) }
     var showEditMapRouteWarning by rememberSaveable { mutableStateOf(false) }
     var showManageRoutes by rememberSaveable { mutableStateOf(false) }
@@ -1582,6 +1733,16 @@ private fun RouteScreen(
     var showAlternativeRoutes by rememberSaveable { mutableStateOf(false) }
     var waitingForAlternatives by rememberSaveable { mutableStateOf(false) }
     var renameText by rememberSaveable(savedMapId, savedMapName) { mutableStateOf(savedMapName.orEmpty()) }
+    BackHandler(enabled = showRouteEditor) {
+        if (routeEditorPanelState == RouteEditorPanelState.MINIMIZED) {
+            routeEditorPanelState = RouteEditorPanelState.HALF
+        } else {
+            confirmRouteEditCancel = true
+        }
+    }
+    BackHandler(enabled = showDetails && !showRouteEditor) {
+        routeDetailsPanelState = RouteDetailsPanelState.DISMISSED
+    }
     val higherScoreRoutes = alternativeRoutes.take(nextLongestRouteCount)
     val lowerScoreRoutes = alternativeRoutes.drop(nextLongestRouteCount)
     val availableRoutes = higherScoreRoutes + listOfNotNull(route) + lowerScoreRoutes
@@ -1614,6 +1775,7 @@ private fun RouteScreen(
         if (!isGeneratingAlternatives && waitingForAlternatives) {
             waitingForAlternatives = false
             showAlternativeRoutes = false
+            routeDetailsPanelState = RouteDetailsPanelState.HALF
             showDetails = true
         }
     }
@@ -1636,12 +1798,17 @@ private fun RouteScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
             Box(Modifier.fillMaxWidth().height(48.dp)) {
                 IconButton(
                     onClick = {
-                        if (isSaving) {
+                        if (showRouteEditor) {
+                            confirmRouteEditCancel = true
+                        } else if (showDetails) {
+                            routeDetailsPanelState = RouteDetailsPanelState.DISMISSED
+                        } else if (isSaving) {
                             pendingHomeAfterSave = true
                         } else if (isDirty || savedMapId == null) {
                             showUnsavedHomeConfirmation = true
@@ -1651,7 +1818,31 @@ private fun RouteScreen(
                     },
                     modifier = Modifier.align(Alignment.CenterStart),
                 ) {
-                    Icon(Icons.Default.Home, contentDescription = stringResource(R.string.home))
+                    val leadingAction = when {
+                        showRouteEditor -> RouteLeadingAction.CANCEL_EDIT
+                        showDetails -> RouteLeadingAction.CLOSE_DETAILS
+                        else -> RouteLeadingAction.HOME
+                    }
+                    Crossfade(
+                        targetState = leadingAction,
+                        animationSpec = tween(if (animationsEnabled) 120 else 0),
+                        label = "routeLeadingAction",
+                    ) { action ->
+                        Icon(
+                            imageVector = if (action == RouteLeadingAction.HOME) {
+                                Icons.Default.Home
+                            } else {
+                                Icons.Default.Close
+                            },
+                            contentDescription = stringResource(
+                                when (action) {
+                                    RouteLeadingAction.HOME -> R.string.home
+                                    RouteLeadingAction.CLOSE_DETAILS -> R.string.close
+                                    RouteLeadingAction.CANCEL_EDIT -> R.string.cancel
+                                },
+                            ),
+                        )
+                    }
                 }
                 Row(
                     modifier = Modifier
@@ -1684,6 +1875,7 @@ private fun RouteScreen(
                     DropdownMenu(
                         expanded = showMapActions,
                         onDismissRequest = { showMapActions = false },
+                        modifier = Modifier.offset(x = (-8).dp, y = 8.dp),
                     ) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.rename_route)) },
@@ -1727,14 +1919,14 @@ private fun RouteScreen(
         Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
             RouteRenderingCanvas(
                 bitmap = bitmap,
-                route = displayedRoute?.path.orEmpty(),
+                route = routeEditorPath ?: displayedRoute?.path.orEmpty(),
                 routeLayers = if (selectableRoutes.isEmpty()) emptyList() else availableRoutes.mapNotNull { candidate ->
                     val metadata = routeMetadata[candidate.id] ?: RouteMetadata()
                     val isActive = candidate.id == displayedRoute?.id
                     if (!isActive && !metadata.isDisplayed) return@mapNotNull null
                     RouteRenderLayer(
                         id = candidate.id,
-                        points = candidate.path,
+                        points = if (isActive) routeEditorPath ?: candidate.path else candidate.path,
                         color = routeColor(metadata.colorIndex),
                         isActive = isActive,
                         patternIndex = metadata.colorIndex,
@@ -1746,10 +1938,26 @@ private fun RouteScreen(
                 rotationGesturesEnabled = rotationGesturesEnabled,
                 onRotationGesture = onRotationGesture,
                 recenterKey = recenterKey,
+                onMapTap = {
+                    if (
+                        showRouteEditor &&
+                        routeEditorPanelState != RouteEditorPanelState.MINIMIZED
+                    ) {
+                        routeEditorPanelState = RouteEditorPanelState.MINIMIZED
+                    }
+                    if (
+                        showDetails &&
+                        routeDetailsPanelState != RouteDetailsPanelState.MINIMIZED
+                    ) {
+                        routeDetailsPanelState = RouteDetailsPanelState.MINIMIZED
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
             MapOverlayButtons(
-                onRotate = { onRotationChange(rotation + 1) },
+                onRotate = {
+                    onRotationChange(nextClockwiseQuarterTurn(rotation, rotationOffsetDegrees))
+                },
                 onRecenter = { onSnapRotation(); recenterKey++ },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
@@ -1808,14 +2016,15 @@ private fun RouteScreen(
                             onDismissRequest = { showRouteMenu = false },
                             properties = PopupProperties(focusable = true),
                         ) {
-                            Surface(
-                                modifier = Modifier.width(IntrinsicSize.Max),
-                                shape = MaterialTheme.shapes.extraSmall,
-                                color = MaterialTheme.colorScheme.surfaceContainer,
-                                tonalElevation = 3.dp,
-                                shadowElevation = 8.dp,
-                            ) {
-                                Column {
+                            AnimatedRouteMenu {
+                                Surface(
+                                    modifier = Modifier.width(IntrinsicSize.Max),
+                                    shape = MaterialTheme.shapes.extraSmall,
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    tonalElevation = 3.dp,
+                                    shadowElevation = 8.dp,
+                                ) {
+                                    Column {
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.generate_route)) },
                                         leadingIcon = {
@@ -1854,7 +2063,13 @@ private fun RouteScreen(
                                         text = { Text(stringResource(R.string.edit_route)) },
                                         enabled = displayedRoute != null && pixelsPerMeter != null,
                                         leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                        onClick = { showRouteMenu = false; showRouteEditor = true },
+                                        onClick = {
+                                            showRouteMenu = false
+                                            showDetails = false
+                                            routeEditorPath = displayedRoute?.path
+                                            routeEditorPanelState = RouteEditorPanelState.HALF
+                                            showRouteEditor = true
+                                        },
                                     )
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.manage_routes)) },
@@ -1867,13 +2082,17 @@ private fun RouteScreen(
                                             showManageRoutes = true
                                         },
                                     )
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 OutlinedButton(
-                    onClick = { showDetails = true },
+                    onClick = {
+                        routeDetailsPanelState = RouteDetailsPanelState.HALF
+                        showDetails = true
+                    },
                     enabled = route != null && availableRoutes.any {
                         routeMetadata[it.id]?.isHidden != true
                     },
@@ -1885,6 +2104,19 @@ private fun RouteScreen(
         }
     }
 
+    if (showRouteEditor && displayedRoute != null && routeEditorPath != null) {
+        RouteEditorBottomSheet(
+            route = displayedRoute,
+            editedPath = requireNotNull(routeEditorPath),
+            allPoints = allPoints,
+            panelState = routeEditorPanelState,
+            onPanelStateChange = { routeEditorPanelState = it },
+            onPathChange = { routeEditorPath = it },
+            onSaveRequest = { confirmRouteEditSave = true },
+            onCancelRequest = { confirmRouteEditCancel = true },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
     if (showDetails && route != null && availableRoutes.any {
         routeMetadata[it.id]?.isHidden != true
     }) {
@@ -1895,6 +2127,8 @@ private fun RouteScreen(
             routeMetadata = routeMetadata,
             selectedRouteId = selectedRouteId,
             showPointsPerKilometer = showPointsPerKilometer,
+            panelState = routeDetailsPanelState,
+            onPanelStateChange = { routeDetailsPanelState = it },
             onRouteSelected = { newRouteId ->
                 if (newRouteId != selectedRouteId) {
                     selectedRouteId = newRouteId
@@ -1903,21 +2137,41 @@ private fun RouteScreen(
                 }
             },
             onDismissRequest = { showDetails = false },
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
-    if (showRouteEditor && displayedRoute != null) {
-        RouteEditorBottomSheet(
-            route = displayedRoute,
-            allPoints = allPoints,
-            onSave = { editedPath ->
+    }
+    if (confirmRouteEditSave && displayedRoute != null) {
+        ConfirmationDialog(
+            title = stringResource(R.string.save_route_edit_title),
+            message = stringResource(R.string.save_route_edit_confirmation),
+            onConfirm = {
                 pixelsPerMeter?.let { scale ->
                     onManageRoutes(
-                        RouteManagementAction.UpdatePath(displayedRoute.id, editedPath, scale),
+                        RouteManagementAction.UpdatePath(
+                            displayedRoute.id,
+                            routeEditorPath.orEmpty(),
+                            scale,
+                        ),
                     )
                 }
+                confirmRouteEditSave = false
                 showRouteEditor = false
+                routeEditorPath = null
             },
-            onDismissRequest = { showRouteEditor = false },
+            onDismiss = { confirmRouteEditSave = false },
+        )
+    }
+    if (confirmRouteEditCancel) {
+        ConfirmationDialog(
+            title = stringResource(R.string.cancel_route_edit_title),
+            message = stringResource(R.string.cancel_route_edit_confirmation),
+            onConfirm = {
+                confirmRouteEditCancel = false
+                showRouteEditor = false
+                routeEditorPath = null
+            },
+            onDismiss = { confirmRouteEditCancel = false },
         )
     }
     if (showRouteRestrictions) {
@@ -1964,6 +2218,13 @@ private fun RouteScreen(
                 showRouteGenerator = false
                 waitingForPrimaryRoute = true
                 onCalculatePrimaryRoute(mode, budget, targetScore)
+            },
+            onCreateEmpty = {
+                pixelsPerMeter?.let { scale ->
+                    showRouteGenerator = false
+                    waitingForPrimaryRoute = false
+                    onManageRoutes(RouteManagementAction.CreateEmpty(allPoints, scale))
+                }
             },
             onDismiss = { if (!isCalculatingRoute) showRouteGenerator = false },
         )
@@ -2074,6 +2335,20 @@ private fun RouteScreen(
 }
 
 @Composable
+private fun AnimatedRouteMenu(content: @Composable () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(120)) +
+            scaleIn(tween(160), initialScale = 0.86f) +
+            expandVertically(tween(160), expandFrom = Alignment.Bottom),
+    ) {
+        content()
+    }
+}
+
+@Composable
 private fun RouteGenerationDialog(
     initialMode: RouteMode,
     initialBudgetMeters: Float,
@@ -2082,6 +2357,7 @@ private fun RouteGenerationDialog(
     canCalculate: Boolean,
     dismissAsCancel: Boolean,
     onGenerate: (RouteMode, Float?, Int?) -> Unit,
+    onCreateEmpty: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
@@ -2126,6 +2402,19 @@ private fun RouteGenerationDialog(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
+                    FilterChip(
+                        selected = false,
+                        onClick = onCreateEmpty,
+                        enabled = !isCalculating,
+                        label = {
+                            Text(
+                                stringResource(R.string.empty_route),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
                 if (mode == RouteMode.BEST_SCORE) {
                     OutlinedTextField(
@@ -2851,7 +3140,8 @@ private fun AlternativeRoutesDialog(
     var maxDistanceText by rememberSaveable { mutableStateOf("") }
     var minScoreText by rememberSaveable { mutableStateOf("") }
     var maxScoreText by rememberSaveable { mutableStateOf("") }
-    var useRelativeValues by rememberSaveable { mutableStateOf(false) }
+    var useRelativeDistanceValues by rememberSaveable { mutableStateOf(false) }
+    var useRelativeScoreValues by rememberSaveable { mutableStateOf(false) }
     val count = countText.toIntOrNull()
     val minDistance = minDistanceText.localizedFloatOrNull()
     val maxDistance = maxDistanceText.localizedFloatOrNull()
@@ -2863,13 +3153,17 @@ private fun AlternativeRoutesDialog(
         (minScoreText.isBlank() || minScore != null) &&
         (maxScoreText.isBlank() || maxScore != null)
     val resolvedMinDistance = minDistance?.let {
-        if (useRelativeValues) sourceRoute.totalDistanceMeters - it else it
+        if (useRelativeDistanceValues) sourceRoute.totalDistanceMeters - it else it
     }
     val resolvedMaxDistance = maxDistance?.let {
-        if (useRelativeValues) sourceRoute.totalDistanceMeters + it else it
+        if (useRelativeDistanceValues) sourceRoute.totalDistanceMeters + it else it
     }
-    val resolvedMinScore = minScore?.let { if (useRelativeValues) sourceRoute.totalScore - it else it }
-    val resolvedMaxScore = maxScore?.let { if (useRelativeValues) sourceRoute.totalScore + it else it }
+    val resolvedMinScore = minScore?.let {
+        if (useRelativeScoreValues) sourceRoute.totalScore - it else it
+    }
+    val resolvedMaxScore = maxScore?.let {
+        if (useRelativeScoreValues) sourceRoute.totalScore + it else it
+    }
     val boundsValid = (resolvedMinDistance == null || resolvedMaxDistance == null ||
         resolvedMinDistance <= resolvedMaxDistance) &&
         (resolvedMinScore == null || resolvedMaxScore == null || resolvedMinScore <= resolvedMaxScore)
@@ -3003,33 +3297,21 @@ private fun AlternativeRoutesDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 HorizontalDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.use_relative_values),
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    }
-                    Switch(
-                        checked = useRelativeValues,
-                        onCheckedChange = { useRelativeValues = it },
-                        enabled = !isGenerating,
-                    )
-                }
-                HorizontalDivider()
                 Text(
                     stringResource(R.string.distance_bounds),
                     style = MaterialTheme.typography.labelLarge,
+                )
+                RelativeValuesToggle(
+                    label = stringResource(R.string.relative_distance_values),
+                    checked = useRelativeDistanceValues,
+                    onCheckedChange = { useRelativeDistanceValues = it },
+                    enabled = !isGenerating,
                 )
                 AlternativeCriterionField(
                     value = minDistanceText,
                     onValueChange = { minDistanceText = it },
                     label = stringResource(
-                        if (useRelativeValues) R.string.distance_under_meters
+                        if (useRelativeDistanceValues) R.string.distance_under_meters
                         else R.string.minimum_distance_meters,
                     ),
                     enabled = !isGenerating,
@@ -3039,7 +3321,7 @@ private fun AlternativeRoutesDialog(
                     value = maxDistanceText,
                     onValueChange = { maxDistanceText = it },
                     label = stringResource(
-                        if (useRelativeValues) R.string.distance_over_meters
+                        if (useRelativeDistanceValues) R.string.distance_over_meters
                         else R.string.maximum_distance_meters,
                     ),
                     enabled = !isGenerating,
@@ -3050,11 +3332,17 @@ private fun AlternativeRoutesDialog(
                     stringResource(R.string.score_bounds),
                     style = MaterialTheme.typography.labelLarge,
                 )
+                RelativeValuesToggle(
+                    label = stringResource(R.string.relative_score_values),
+                    checked = useRelativeScoreValues,
+                    onCheckedChange = { useRelativeScoreValues = it },
+                    enabled = !isGenerating,
+                )
                 AlternativeCriterionField(
                     value = minScoreText,
                     onValueChange = { minScoreText = it },
                     label = stringResource(
-                        if (useRelativeValues) R.string.points_under else R.string.minimum_points,
+                        if (useRelativeScoreValues) R.string.points_under else R.string.minimum_points,
                     ),
                     enabled = !isGenerating,
                     integerOnly = true,
@@ -3064,7 +3352,7 @@ private fun AlternativeRoutesDialog(
                     value = maxScoreText,
                     onValueChange = { maxScoreText = it },
                     label = stringResource(
-                        if (useRelativeValues) R.string.points_over else R.string.maximum_points,
+                        if (useRelativeScoreValues) R.string.points_over else R.string.maximum_points,
                     ),
                     enabled = !isGenerating,
                     integerOnly = true,
@@ -3098,7 +3386,8 @@ private fun AlternativeRoutesDialog(
                             maxDistanceMeters = maxDistance,
                             minScore = minScore,
                             maxScore = maxScore,
-                            useRelativeValues = useRelativeValues,
+                            useRelativeDistanceValues = useRelativeDistanceValues,
+                            useRelativeScoreValues = useRelativeScoreValues,
                             fixedPrefixPointCount = splitAfterIndex + 1,
                         ),
                     )
@@ -3118,6 +3407,23 @@ private fun AlternativeRoutesDialog(
             }
         },
     )
+}
+
+@Composable
+private fun RelativeValuesToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    }
 }
 
 @Composable

@@ -2,17 +2,30 @@ package com.orientesanasrekinatajs.ui.components
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
@@ -27,20 +40,28 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -48,13 +69,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.ControlPoint
 import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
+import com.orientesanasrekinatajs.ui.theme.LocalAnimationsEnabled
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-/** Modal route breakdown with one row for every point in visit order. */
+enum class RouteDetailsPanelState { MINIMIZED, HALF, EXPANDED, DISMISSED }
+enum class RouteEditorPanelState { MINIMIZED, HALF, EXPANDED }
+
+/** Draggable route breakdown with one row for every point in visit order. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RouteDetailsBottomSheet(
@@ -65,6 +94,8 @@ fun RouteDetailsBottomSheet(
     selectedRouteId: String? = null,
     showPointsPerKilometer: Boolean = false,
     onRouteSelected: (String) -> Unit = {},
+    panelState: RouteDetailsPanelState,
+    onPanelStateChange: (RouteDetailsPanelState) -> Unit,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -76,10 +107,140 @@ fun RouteDetailsBottomSheet(
     val safeSelectedIndex = routes.indexOfFirst { it.id == selectedRouteId }
         .takeIf { it >= 0 } ?: primaryRouteIndex.takeIf { it >= 0 } ?: 0
     val selectedRoute = routes[safeSelectedIndex]
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
-        modifier = modifier,
-    ) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val minimumHeightPx = with(density) { 136.dp.toPx() }
+        val maximumHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(minimumHeightPx)
+        val halfHeightPx = (constraints.maxHeight * 0.5f).coerceIn(
+            minimumHeightPx,
+            maximumHeightPx,
+        )
+        val targetHeightPx = when (panelState) {
+            RouteDetailsPanelState.MINIMIZED -> minimumHeightPx
+            RouteDetailsPanelState.HALF -> halfHeightPx
+            RouteDetailsPanelState.EXPANDED -> maximumHeightPx
+            RouteDetailsPanelState.DISMISSED -> 0f
+        }
+        var panelHeightPx by remember(constraints.maxHeight) { mutableFloatStateOf(0f) }
+        var dragDistanceY by remember { mutableFloatStateOf(0f) }
+        var settleRequest by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        val animationsEnabled = LocalAnimationsEnabled.current
+        LaunchedEffect(
+            panelState,
+            settleRequest,
+            constraints.maxHeight,
+            animationsEnabled,
+        ) {
+            if (!animationsEnabled) {
+                panelHeightPx = targetHeightPx
+            } else {
+                animate(
+                    initialValue = panelHeightPx,
+                    targetValue = targetHeightPx,
+                    animationSpec = tween(240),
+                ) { value, _ -> panelHeightPx = value }
+            }
+            if (panelState == RouteDetailsPanelState.DISMISSED) onDismissRequest()
+        }
+        val panelDragState = rememberDraggableState { delta ->
+            dragDistanceY += delta
+            panelHeightPx = (panelHeightPx - delta).coerceIn(0f, maximumHeightPx)
+        }
+        val fadeDistancePx = with(density) { 36.dp.toPx() }
+        val detailsAlpha = ((panelHeightPx - minimumHeightPx) / fadeDistancePx).coerceIn(0f, 1f)
+        val expandThresholdPx = with(density) { 28.dp.toPx() }
+        val flickVelocityThresholdPx = with(density) { 320.dp.toPx() }
+        val dismissHeightPx = minimumHeightPx * 0.35f
+        val fullScreenProgress = if (maximumHeightPx > halfHeightPx) {
+            ((panelHeightPx - halfHeightPx) / (maximumHeightPx - halfHeightPx)).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+        val topCorner = 28.dp * (1f - fullScreenProgress)
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(with(density) { panelHeightPx.toDp() }),
+            shape = RoundedCornerShape(topStart = topCorner, topEnd = topCorner),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            tonalElevation = 3.dp,
+            shadowElevation = 8.dp * (1f - fullScreenProgress),
+        ) {
+        Column(Modifier.fillMaxHeight()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .draggable(
+                    state = panelDragState,
+                    orientation = Orientation.Vertical,
+                    onDragStarted = { dragDistanceY = 0f },
+                    onDragStopped = { velocity ->
+                        when {
+                            dragDistanceY > 0f && panelHeightPx <= dismissHeightPx ->
+                                onPanelStateChange(RouteDetailsPanelState.DISMISSED)
+                            velocity > flickVelocityThresholdPx -> when (panelState) {
+                                RouteDetailsPanelState.EXPANDED -> onPanelStateChange(
+                                    RouteDetailsPanelState.HALF,
+                                )
+                                RouteDetailsPanelState.HALF -> onPanelStateChange(
+                                    RouteDetailsPanelState.MINIMIZED,
+                                )
+                                RouteDetailsPanelState.MINIMIZED -> onPanelStateChange(
+                                    RouteDetailsPanelState.DISMISSED,
+                                )
+                                RouteDetailsPanelState.DISMISSED -> Unit
+                            }
+                            velocity < -flickVelocityThresholdPx -> when (panelState) {
+                                RouteDetailsPanelState.MINIMIZED -> onPanelStateChange(
+                                    RouteDetailsPanelState.HALF,
+                                )
+                                RouteDetailsPanelState.HALF -> onPanelStateChange(
+                                    RouteDetailsPanelState.EXPANDED,
+                                )
+                                RouteDetailsPanelState.EXPANDED -> settleRequest++
+                                RouteDetailsPanelState.DISMISSED -> Unit
+                            }
+                            dragDistanceY > 0f -> {
+                                val closestState = listOf(
+                                    RouteDetailsPanelState.MINIMIZED to minimumHeightPx,
+                                    RouteDetailsPanelState.HALF to halfHeightPx,
+                                    RouteDetailsPanelState.EXPANDED to maximumHeightPx,
+                                ).minBy { (_, anchorHeight) ->
+                                    kotlin.math.abs(anchorHeight - panelHeightPx)
+                                }.first
+                                onPanelStateChange(closestState)
+                                settleRequest++
+                            }
+                            dragDistanceY < -expandThresholdPx -> {
+                                val closestState = listOf(
+                                    RouteDetailsPanelState.MINIMIZED to minimumHeightPx,
+                                    RouteDetailsPanelState.HALF to halfHeightPx,
+                                    RouteDetailsPanelState.EXPANDED to maximumHeightPx,
+                                ).minBy { (_, anchorHeight) ->
+                                    kotlin.math.abs(anchorHeight - panelHeightPx)
+                                }.first
+                                onPanelStateChange(closestState)
+                                settleRequest++
+                            }
+                            else -> settleRequest++
+                        }
+                    },
+                ),
+        ) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 10.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
+            )
+            Box(Modifier.fillMaxWidth().height(42.dp)) {
+                Text(
+                    stringResource(R.string.route_details),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+        }
         PrimaryScrollableTabRow(
             selectedTabIndex = safeSelectedIndex,
             edgePadding = 12.dp,
@@ -194,43 +355,193 @@ fun RouteDetailsBottomSheet(
         }
         RouteStepTable(
             route = selectedRoute,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .graphicsLayer { alpha = detailsAlpha },
         )
+        }
+        }
     }
 }
 
-/** Edits the selected route's visit order and set of scored controls. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Persistent route editor that leaves the map interactive while partially collapsed. */
 @Composable
 fun RouteEditorBottomSheet(
     route: OptimizedRoute,
+    editedPath: List<ControlPoint>,
     allPoints: List<ControlPoint>,
-    onSave: (List<ControlPoint>) -> Unit,
-    onDismissRequest: () -> Unit,
+    panelState: RouteEditorPanelState,
+    onPanelStateChange: (RouteEditorPanelState) -> Unit,
+    onPathChange: (List<ControlPoint>) -> Unit,
+    onSaveRequest: () -> Unit,
+    onCancelRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var editedPath by remember(route.id) { mutableStateOf(route.path) }
     var addPointMenuExpanded by remember { mutableStateOf(false) }
+    var draggedPointId by remember { mutableStateOf<String?>(null) }
+    var draggedCenterY by remember { mutableFloatStateOf(0f) }
+    var autoScrollDirection by remember { mutableFloatStateOf(0f) }
+    var autoScrollJob by remember { mutableStateOf<Job?>(null) }
+    var settleRequest by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val latestPath by rememberUpdatedState(editedPath)
+    val listState = rememberLazyListState()
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    val animationsEnabled = LocalAnimationsEnabled.current
     val usedPointIds = editedPath.mapTo(mutableSetOf(), ControlPoint::id)
     val availableControls = allPoints.filter { point ->
         point.type == ControlPointType.CONTROL && point.id !in usedPointIds
     }.sortedBy(ControlPoint::code)
     val canReverse = editedPath.any { it.type == ControlPointType.START_FINISH }
-    val movePoint: (Int, Int) -> Unit = { from, to ->
+    val movePoint: (Int, Int) -> Unit = movePoint@{ from, to ->
+        if (from !in editedPath.indices || to !in editedPath.indices || from == to) return@movePoint
         val reordered = editedPath.toMutableList()
         val moved = reordered.removeAt(from)
         reordered.add(to, moved)
-        editedPath = reordered
+        onPathChange(reordered)
+    }
+    val reorderDraggedControl: (String, Float) -> Unit = reorder@{ controlId, centerY ->
+        val layout = listState.layoutInfo
+        val target = layout.visibleItemsInfo.minByOrNull { item ->
+            kotlin.math.abs(item.offset + item.size / 2f - centerY)
+        }?.index ?: return@reorder
+        val current = latestPath.indexOfFirst { it.id == controlId }
+        if (current < 0) return@reorder
+        val controlIndices = latestPath.indices.filter {
+            latestPath[it].type == ControlPointType.CONTROL
+        }
+        val destination = target.coerceIn(
+            controlIndices.firstOrNull() ?: current,
+            controlIndices.lastOrNull() ?: current,
+        )
+        if (destination != current) {
+            val reordered = latestPath.toMutableList()
+            reordered.add(destination, reordered.removeAt(current))
+            onPathChange(reordered)
+        }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
-        modifier = modifier,
-    ) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val minimumHeightPx = with(density) { 176.dp.toPx() }
+        val maximumHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(minimumHeightPx)
+        val halfHeightPx = (constraints.maxHeight * 0.5f).coerceIn(
+            minimumHeightPx,
+            maximumHeightPx,
+        )
+        val targetHeightPx = when (panelState) {
+            RouteEditorPanelState.MINIMIZED -> minimumHeightPx
+            RouteEditorPanelState.HALF -> halfHeightPx
+            RouteEditorPanelState.EXPANDED -> maximumHeightPx
+        }
+        var panelHeightPx by remember(constraints.maxHeight) { mutableFloatStateOf(0f) }
+        var dragDistanceY by remember { mutableFloatStateOf(0f) }
+        var isPanelDragging by remember { mutableStateOf(false) }
+        LaunchedEffect(
+            panelState,
+            settleRequest,
+            constraints.maxHeight,
+            animationsEnabled,
+            isPanelDragging,
+        ) {
+            if (isPanelDragging) return@LaunchedEffect
+            if (!animationsEnabled) {
+                panelHeightPx = targetHeightPx
+            } else {
+                animate(
+                    initialValue = panelHeightPx,
+                    targetValue = targetHeightPx,
+                    animationSpec = tween(180),
+                ) { value, _ -> panelHeightPx = value }
+            }
+        }
+        val panelDragState = rememberDraggableState { delta ->
+            dragDistanceY += delta
+            panelHeightPx = (panelHeightPx - delta).coerceIn(minimumHeightPx, maximumHeightPx)
+        }
+        val swipeThresholdPx = with(density) { 28.dp.toPx() }
+        val flickVelocityThresholdPx = with(density) { 320.dp.toPx() }
+        val isFullScreen = panelState == RouteEditorPanelState.EXPANDED
+        val topCorner = if (isFullScreen) 0.dp else 28.dp
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .dynamicHeightPx { panelHeightPx },
+            shape = RoundedCornerShape(topStart = topCorner, topEnd = topCorner),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            tonalElevation = 3.dp,
+            shadowElevation = if (isFullScreen) 0.dp else 8.dp,
+        ) {
+        Column(Modifier.fillMaxHeight()) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .draggable(
+                    state = panelDragState,
+                    orientation = Orientation.Vertical,
+                    enabled = draggedPointId == null,
+                    onDragStarted = {
+                        isPanelDragging = true
+                        dragDistanceY = 0f
+                    },
+                    onDragStopped = { velocity ->
+                        when {
+                            velocity < -flickVelocityThresholdPx -> when (panelState) {
+                                RouteEditorPanelState.MINIMIZED -> onPanelStateChange(
+                                    RouteEditorPanelState.HALF,
+                                )
+                                RouteEditorPanelState.HALF -> onPanelStateChange(
+                                    RouteEditorPanelState.EXPANDED,
+                                )
+                                RouteEditorPanelState.EXPANDED -> settleRequest++
+                            }
+                            velocity > flickVelocityThresholdPx -> when (panelState) {
+                                RouteEditorPanelState.EXPANDED -> onPanelStateChange(
+                                    RouteEditorPanelState.HALF,
+                                )
+                                RouteEditorPanelState.HALF -> onPanelStateChange(
+                                    RouteEditorPanelState.MINIMIZED,
+                                )
+                                RouteEditorPanelState.MINIMIZED -> settleRequest++
+                            }
+                            dragDistanceY > 0f -> {
+                                val closestState = listOf(
+                                    RouteEditorPanelState.MINIMIZED to minimumHeightPx,
+                                    RouteEditorPanelState.HALF to halfHeightPx,
+                                    RouteEditorPanelState.EXPANDED to maximumHeightPx,
+                                ).minBy { (_, anchorHeight) ->
+                                    kotlin.math.abs(anchorHeight - panelHeightPx)
+                                }.first
+                                onPanelStateChange(closestState)
+                                settleRequest++
+                            }
+                            dragDistanceY < -swipeThresholdPx -> {
+                                val closestState = listOf(
+                                    RouteEditorPanelState.MINIMIZED to minimumHeightPx,
+                                    RouteEditorPanelState.HALF to halfHeightPx,
+                                    RouteEditorPanelState.EXPANDED to maximumHeightPx,
+                                ).minBy { (_, anchorHeight) ->
+                                    kotlin.math.abs(anchorHeight - panelHeightPx)
+                                }.first
+                                onPanelStateChange(closestState)
+                                settleRequest++
+                            }
+                            else -> settleRequest++
+                        }
+                        isPanelDragging = false
+                    },
+                )
+                .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 10.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
+            )
             Text(
                 text = stringResource(R.string.edit_route),
                 style = MaterialTheme.typography.titleLarge,
@@ -264,9 +575,9 @@ fun RouteEditorBottomSheet(
                                             ControlPointType.START_FINISH,
                                         )
                                     } ?: editedPath.size
-                                    editedPath = editedPath.toMutableList().apply {
-                                        add(insertionIndex, point)
-                                    }
+                                    onPathChange(
+                                        editedPath.toMutableList().apply { add(insertionIndex, point) },
+                                    )
                                     addPointMenuExpanded = false
                                 },
                             )
@@ -274,7 +585,7 @@ fun RouteEditorBottomSheet(
                     }
                 }
                 OutlinedButton(
-                    onClick = { editedPath = editedPath.reversed() },
+                    onClick = { onPathChange(editedPath.reversed()) },
                     enabled = canReverse,
                 ) {
                     Icon(Icons.Default.SwapVert, contentDescription = null)
@@ -282,12 +593,20 @@ fun RouteEditorBottomSheet(
                 }
             }
         }
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(top = 6.dp),
+        val showEditorList = panelState != RouteEditorPanelState.MINIMIZED
+        if (showEditorList) LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 6.dp),
         ) {
             itemsIndexed(
                 items = editedPath,
-                key = { index, control -> "$index:${control.id}" },
+                key = { index, control ->
+                    when {
+                        control.type == ControlPointType.CONTROL -> control.id
+                        index == 0 -> "start:${control.id}"
+                        else -> "finish:${control.id}"
+                    }
+                },
             ) { index, control ->
                 val isControl = control.type == ControlPointType.CONTROL
                 val canMoveUp = isControl && index > 0 &&
@@ -295,33 +614,123 @@ fun RouteEditorBottomSheet(
                 val canMoveDown = isControl && index < editedPath.lastIndex &&
                     editedPath[index + 1].type == ControlPointType.CONTROL
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    modifier = Modifier
+                        .animateItem(
+                            fadeInSpec = tween(if (animationsEnabled) 180 else 0),
+                            fadeOutSpec = tween(if (animationsEnabled) 180 else 0),
+                            placementSpec = tween(
+                                if (animationsEnabled && draggedPointId == null) 240 else 0,
+                            ),
+                        )
+                        .graphicsLayer { alpha = if (draggedPointId == control.id) 0.72f else 1f }
+                        .background(
+                            if (draggedPointId == control.id) {
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+                            } else {
+                                Color.Transparent
+                            },
+                            RoundedCornerShape(10.dp),
+                        )
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
                         text = (index + 1).toString(),
                         style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.width(30.dp),
                     )
                     Text(
-                        text = routeEditorPointLabel(control),
+                        text = routeEditorListPointLabel(control),
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = { movePoint(index, index - 1) }, enabled = canMoveUp) {
+                    if (isControl) {
+                        Text(
+                            text = "(${control.points})",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                    val dragModifier = Modifier.pointerInput(control.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                if (isControl) {
+                                    draggedPointId = control.id
+                                    draggedCenterY = listState.layoutInfo.visibleItemsInfo
+                                        .firstOrNull { it.index == index }
+                                        ?.let { it.offset + it.size / 2f } ?: 0f
+                                }
+                            },
+                            onDragCancel = {
+                                autoScrollDirection = 0f
+                                autoScrollJob?.cancel()
+                                autoScrollJob = null
+                                draggedPointId = null
+                            },
+                            onDragEnd = {
+                                autoScrollDirection = 0f
+                                autoScrollJob?.cancel()
+                                autoScrollJob = null
+                                draggedPointId = null
+                            },
+                            onDrag = { change, amount ->
+                                if (draggedPointId == control.id) {
+                                    change.consume()
+                                    val layout = listState.layoutInfo
+                                    val edge = 56.dp.toPx()
+                                    draggedCenterY = (draggedCenterY + amount.y).coerceIn(
+                                        layout.viewportStartOffset.toFloat(),
+                                        layout.viewportEndOffset.toFloat(),
+                                    )
+                                    val scroll = when {
+                                        draggedCenterY < layout.viewportStartOffset + edge -> -24f
+                                        draggedCenterY > layout.viewportEndOffset - edge -> 24f
+                                        else -> 0f
+                                    }
+                                    autoScrollDirection = scroll
+                                    if (scroll == 0f) {
+                                        autoScrollJob?.cancel()
+                                        autoScrollJob = null
+                                    } else if (autoScrollJob?.isActive != true) {
+                                        autoScrollJob = coroutineScope.launch {
+                                            while (autoScrollDirection != 0f) {
+                                                listState.scrollBy(autoScrollDirection)
+                                                reorderDraggedControl(control.id, draggedCenterY)
+                                                delay(16)
+                                            }
+                                        }
+                                    }
+                                    reorderDraggedControl(control.id, draggedCenterY)
+                                }
+                            },
+                        )
+                    }
+                    IconButton(
+                        onClick = { movePoint(index, index - 1) },
+                        enabled = canMoveUp,
+                        modifier = dragModifier,
+                    ) {
                         Icon(
                             Icons.Default.ArrowUpward,
                             contentDescription = stringResource(R.string.move_point_up),
                         )
                     }
-                    IconButton(onClick = { movePoint(index, index + 1) }, enabled = canMoveDown) {
+                    IconButton(
+                        onClick = { movePoint(index, index + 1) },
+                        enabled = canMoveDown,
+                        modifier = dragModifier,
+                    ) {
                         Icon(
                             Icons.Default.ArrowDownward,
                             contentDescription = stringResource(R.string.move_point_down),
                         )
                     }
                     IconButton(
-                        onClick = { editedPath = editedPath.filterIndexed { i, _ -> i != index } },
+                        onClick = {
+                            onPathChange(editedPath.filterIndexed { i, _ -> i != index })
+                        },
                         enabled = isControl,
                     ) {
                         Icon(
@@ -332,17 +741,23 @@ fun RouteEditorBottomSheet(
                 }
                 if (index < editedPath.lastIndex) HorizontalDivider()
             }
+        } else {
+            Spacer(Modifier.weight(1f))
         }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onDismissRequest) { Text(stringResource(R.string.cancel)) }
+            TextButton(onClick = onCancelRequest) { Text(stringResource(R.string.cancel)) }
             Button(
-                onClick = { onSave(editedPath) },
+                onClick = onSaveRequest,
                 enabled = editedPath != route.path && editedPath.size >= 2,
             ) { Text(stringResource(R.string.save)) }
+        }
+        }
         }
     }
 }
@@ -352,6 +767,22 @@ private fun routeEditorPointLabel(point: ControlPoint): String = when (point.typ
     ControlPointType.FINISH -> "F"
     ControlPointType.START_FINISH -> "S/F"
     ControlPointType.CONTROL -> "${point.code} (${point.points})"
+}
+
+private fun routeEditorListPointLabel(point: ControlPoint): String = when (point.type) {
+    ControlPointType.START -> "S"
+    ControlPointType.FINISH -> "F"
+    ControlPointType.START_FINISH -> "S/F"
+    ControlPointType.CONTROL -> point.code.toString()
+}
+
+/** Reads rapidly changing height state during layout, avoiding route-list recomposition per pixel. */
+private fun Modifier.dynamicHeightPx(heightPx: () -> Float): Modifier = layout { measurable, constraints ->
+    val height = heightPx().roundToInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+    val placeable = measurable.measure(
+        constraints.copy(minHeight = height, maxHeight = height),
+    )
+    layout(placeable.width, height) { placeable.placeRelative(0, 0) }
 }
 
 /** Scrollable tabular representation used by the route details bottom sheet. */
