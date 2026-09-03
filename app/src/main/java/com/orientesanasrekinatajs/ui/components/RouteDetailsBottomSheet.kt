@@ -109,7 +109,9 @@ fun RouteDetailsBottomSheet(
     val selectedRoute = routes[safeSelectedIndex]
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val density = LocalDensity.current
-        val minimumHeightPx = with(density) { 136.dp.toPx() }
+        val minimizedHeight = if (showPointsPerKilometer) 160.dp else 136.dp
+        val routeTabMinimumHeight = if (showPointsPerKilometer) 92.dp else 48.dp
+        val minimumHeightPx = with(density) { minimizedHeight.toPx() }
         val maximumHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(minimumHeightPx)
         val halfHeightPx = (constraints.maxHeight * 0.5f).coerceIn(
             minimumHeightPx,
@@ -130,6 +132,7 @@ fun RouteDetailsBottomSheet(
             settleRequest,
             constraints.maxHeight,
             animationsEnabled,
+            showPointsPerKilometer,
         ) {
             if (!animationsEnabled) {
                 panelHeightPx = targetHeightPx
@@ -258,6 +261,7 @@ fun RouteDetailsBottomSheet(
                     selected = isSelected,
                     onClick = { onRouteSelected(candidate.id) },
                     modifier = Modifier
+                        .heightIn(min = routeTabMinimumHeight)
                         .padding(horizontal = 3.dp, vertical = 4.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(
