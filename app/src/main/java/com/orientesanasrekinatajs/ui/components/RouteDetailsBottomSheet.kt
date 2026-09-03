@@ -618,9 +618,7 @@ fun RouteEditorBottomSheet(
                         .animateItem(
                             fadeInSpec = tween(if (animationsEnabled) 180 else 0),
                             fadeOutSpec = tween(if (animationsEnabled) 180 else 0),
-                            placementSpec = tween(
-                                if (animationsEnabled && draggedPointId == null) 240 else 0,
-                            ),
+                            placementSpec = tween(if (animationsEnabled) 180 else 0),
                         )
                         .graphicsLayer { alpha = if (draggedPointId == control.id) 0.72f else 1f }
                         .background(

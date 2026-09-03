@@ -1132,5 +1132,5 @@ private const val CORNER_TOUCH_RADIUS_PX = 56f
 private const val TAP_SLOP_PX = 12f
 private const val ROUTE_LONG_PRESS_RADIUS_PX = 32f
 private const val MIN_PINNED_ROUTE_STROKE_WIDTH = 3f
-private const val MAX_PINNED_ROUTE_STROKE_WIDTH = 9f
+private const val MAX_PINNED_ROUTE_STROKE_WIDTH = 7f
 private const val SINGLE_PINNED_ROUTE_STROKE_WIDTH = 4f

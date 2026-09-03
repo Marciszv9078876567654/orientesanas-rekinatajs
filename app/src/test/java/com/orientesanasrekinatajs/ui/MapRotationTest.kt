@@ -28,9 +28,9 @@ class MapRotationTest {
         val widths = List(5) { priority -> pinnedRouteStrokeWidth(priority, 5) }
 
         assertEquals(3f, widths.first(), 0.001f)
-        assertEquals(9f, widths.last(), 0.001f)
+        assertEquals(7f, widths.last(), 0.001f)
         assertTrue(widths.zipWithNext().all { (higher, lower) -> higher < lower })
-        assertTrue(widths.all { it >= 3f })
+        assertTrue(widths.all { it in 3f..7f })
         assertEquals(4f, pinnedRouteStrokeWidth(0, 1), 0.001f)
     }
 }
