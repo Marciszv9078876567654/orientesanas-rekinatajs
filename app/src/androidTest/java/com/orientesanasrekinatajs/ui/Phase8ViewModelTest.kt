@@ -10,6 +10,7 @@ import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.MapBoundary
 import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.imageprocessing.DetectedControlSymbol
+import com.orientesanasrekinatajs.imageprocessing.ColorCalibrationSample
 import com.orientesanasrekinatajs.ui.processing.MapProcessingEngine
 import com.orientesanasrekinatajs.ui.processing.MapProcessingStage
 import com.orientesanasrekinatajs.ui.processing.MapProcessingViewModel
@@ -108,6 +109,34 @@ class Phase8ViewModelTest {
         val points = viewModel.uiState.value.controlPoints
         assertTrue(points.none { it.id == original.id })
         assertTrue(points.any { it.id == added.id && it.code == 72 })
+    }
+
+    @Test
+    fun mapProcessing_calibratesOnRectifiedMapAndPreservesExistingPoints() {
+        val sample = ColorCalibrationSample(140.0..160.0, 80.0..255.0, 60.0..255.0, 10f)
+        val engine = FakeProcessingEngine(
+            calibrationSample = sample,
+            calibratedSymbols = listOf(
+                DetectedControlSymbol(Point2D(75f, 20f), 10f, ControlPointType.CONTROL),
+            ),
+        )
+        val viewModel = MapProcessingViewModel(engine, Dispatchers.Unconfined)
+        onMainThread { viewModel.processImage(Uri.parse("content://test/calibration")) }
+        val existingIds = viewModel.uiState.value.controlPoints.mapTo(mutableSetOf(), ControlPoint::id)
+
+        onMainThread {
+            viewModel.startColorCalibration()
+            assertTrue(viewModel.uiState.value.isCalibratingColor)
+            viewModel.applyColorCalibrationSample(Point2D(75f, 20f))
+        }
+
+        val state = viewModel.uiState.value
+        assertEquals(MapProcessingStage.COMPLETE, state.stage)
+        assertEquals(sample, state.colorCalibration)
+        assertTrue(!state.isCalibratingColor)
+        assertTrue(state.controlPoints.mapTo(mutableSetOf(), ControlPoint::id).containsAll(existingIds))
+        assertTrue(state.controlPoints.any { it.center == Point2D(75f, 20f) })
+        assertTrue(engine.calls.containsAll(listOf("sample", "calibratedSymbols", "isolate")))
     }
 
     @Test
@@ -353,6 +382,8 @@ class Phase8ViewModelTest {
         ),
         private val ocrFailure: Throwable? = null,
         private val symbolFailure: Throwable? = null,
+        private val calibrationSample: ColorCalibrationSample? = null,
+        private val calibratedSymbols: List<DetectedControlSymbol> = emptyList(),
     ) : MapProcessingEngine {
         val calls = mutableListOf<String>()
         private val bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
@@ -383,5 +414,25 @@ class Phase8ViewModelTest {
             ocrFailure?.let { throw it }
             return 65
         }
+
+        override fun detectControlSymbols(
+            bitmap: Bitmap,
+            colorCalibration: ColorCalibrationSample?,
+        ): List<DetectedControlSymbol> = if (colorCalibration == null) {
+            detectControlSymbols(bitmap)
+        } else {
+            calls += "calibratedSymbols"
+            calibratedSymbols
+        }
+
+        override fun sampleControlPointColor(
+            bitmap: Bitmap,
+            tapPoint: Point2D,
+        ): ColorCalibrationSample? = calibrationSample.also { calls += "sample" }
+
+        override fun isolateInkColor(
+            bitmap: Bitmap,
+            colorCalibration: ColorCalibrationSample?,
+        ): Bitmap = bitmap.also { if (colorCalibration != null) calls += "isolate" }
     }
 }

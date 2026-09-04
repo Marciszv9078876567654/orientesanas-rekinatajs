@@ -85,6 +85,10 @@ fun OrienteeringApp(
     onAddControlPoint: (ControlPoint) -> Unit,
     onRemoveControlPoint: (String) -> Unit,
     onClearControlPoints: () -> Unit,
+    onStartColorCalibration: () -> Unit,
+    onApplyColorCalibrationSample: (Point2D) -> Unit,
+    onCancelColorCalibration: () -> Unit,
+    onDismissProcessingError: () -> Unit,
     onInvalidateRoute: () -> Unit,
     onCalculateRoute: (
         pixelsPerMeter: Float,
@@ -201,7 +205,8 @@ fun OrienteeringApp(
                     onApplyBoundary = onApplyBoundary,
                     onBack = onReset,
                 )
-                processingState.error != null -> ErrorScreen(processingState.error, onReset)
+                processingState.error != null && processingState.stage != MapProcessingStage.COMPLETE ->
+                    ErrorScreen(processingState.error, onReset)
                 processingState.stage == MapProcessingStage.COMPLETE -> MapFlowScreen(
                     processingState = processingState,
                     routingState = routingState,
@@ -217,6 +222,10 @@ fun OrienteeringApp(
                     onAddControlPoint = onAddControlPoint,
                     onRemoveControlPoint = onRemoveControlPoint,
                     onClearControlPoints = onClearControlPoints,
+                    onStartColorCalibration = onStartColorCalibration,
+                    onApplyColorCalibrationSample = onApplyColorCalibrationSample,
+                    onCancelColorCalibration = onCancelColorCalibration,
+                    onDismissProcessingError = onDismissProcessingError,
                     onInvalidateRoute = onInvalidateRoute,
                     onCalculateRoute = onCalculateRoute,
                     onGenerateAlternativeRoutes = onGenerateAlternativeRoutes,

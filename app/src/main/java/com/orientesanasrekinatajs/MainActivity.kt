@@ -84,6 +84,10 @@ class MainActivity : AppCompatActivity() {
                     onClearControlPoints = {
                         mapProcessingViewModel.clearControlPoints()
                     },
+                    onStartColorCalibration = mapProcessingViewModel::startColorCalibration,
+                    onApplyColorCalibrationSample = mapProcessingViewModel::applyColorCalibrationSample,
+                    onCancelColorCalibration = mapProcessingViewModel::cancelColorCalibration,
+                    onDismissProcessingError = mapProcessingViewModel::dismissError,
                     onInvalidateRoute = routingViewModel::invalidateRoute,
                     onCalculateRoute = { pixelsPerMeter, mode, budgetMeters, targetScore ->
                         routingViewModel.calculateRoute(

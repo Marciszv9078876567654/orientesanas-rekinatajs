@@ -60,6 +60,7 @@ import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.MapBoundary
 import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.ui.components.DistanceCalibrationCanvas
+import com.orientesanasrekinatajs.ui.components.ControlColorCalibrationCanvas
 import com.orientesanasrekinatajs.ui.components.InteractiveCornerCanvas
 import com.orientesanasrekinatajs.ui.components.InteractiveControlPointCanvas
 import com.orientesanasrekinatajs.ui.processing.MapProcessingUiState
@@ -77,6 +78,10 @@ internal fun EditMapScreen(
     onAddControlPoint: (ControlPoint) -> Unit,
     onRemoveControlPoint: (String) -> Unit,
     onClearControlPoints: () -> Unit,
+    onStartColorCalibration: () -> Unit,
+    onApplyColorCalibrationSample: (Point2D) -> Unit,
+    onCancelColorCalibration: () -> Unit,
+    onDismissProcessingError: () -> Unit,
     onOpenRoute: () -> Unit,
     isSaving: Boolean,
     isDirty: Boolean,
@@ -95,6 +100,43 @@ internal fun EditMapScreen(
     onBack: () -> Unit,
 ) {
     val rectified = requireNotNull(processingState.rectifiedBitmap)
+    if (processingState.isCalibratingColor) {
+        BackHandler(onBack = onCancelColorCalibration)
+        Column(Modifier.fillMaxSize()) {
+            ScreenTopBar(
+                title = stringResource(R.string.calibrate_control_color),
+                onBack = onCancelColorCalibration,
+            )
+            Text(
+                text = stringResource(R.string.calibrate_control_color_help),
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                textAlign = TextAlign.Center,
+            )
+            ControlColorCalibrationCanvas(
+                bitmap = rectified,
+                onPointSelected = onApplyColorCalibrationSample,
+                rotationQuarterTurns = rotation,
+                rotationOffsetDegrees = rotationOffsetDegrees,
+                rotationGesturesEnabled = rotationGesturesEnabled,
+                onRotationGesture = onRotationGesture,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+            )
+            OutlinedButton(
+                onClick = onCancelColorCalibration,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+            ) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+        processingState.error?.let { error ->
+            MessageDialog(
+                title = stringResource(R.string.calibrate_control_color_failed),
+                message = error,
+                onDismiss = onDismissProcessingError,
+            )
+        }
+        return
+    }
     var editMode by rememberSaveable { mutableStateOf(EditMode.CALIBRATION) }
     var editedBoundary by remember(processingState.boundary) { mutableStateOf(processingState.boundary) }
     var cornerEditBaseline by remember(processingState.boundary) { mutableStateOf<MapBoundary?>(null) }
@@ -344,6 +386,12 @@ internal fun EditMapScreen(
                 }
 
                 EditMode.CALIBRATION -> {
+                    OutlinedButton(
+                        onClick = onStartColorCalibration,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    ) {
+                        Text(stringResource(R.string.calibrate_control_color))
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),

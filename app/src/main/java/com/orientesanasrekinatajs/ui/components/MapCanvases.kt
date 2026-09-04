@@ -558,6 +558,34 @@ fun DistanceCalibrationCanvas(
     }
 }
 
+/** Reuses the map viewport and tap conversion to select one known control symbol. */
+@Composable
+fun ControlColorCalibrationCanvas(
+    bitmap: Bitmap,
+    onPointSelected: (Point2D) -> Unit,
+    rotationQuarterTurns: Int = 0,
+    rotationOffsetDegrees: Float = 0f,
+    rotationGesturesEnabled: Boolean = true,
+    onRotationGesture: (Float) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    var selectedPoint by remember(bitmap) { mutableStateOf<Point2D?>(null) }
+    DistanceCalibrationCanvas(
+        bitmap = bitmap,
+        start = selectedPoint,
+        end = null,
+        onLineChange = { point, _ ->
+            selectedPoint = point
+            point?.let(onPointSelected)
+        },
+        rotationQuarterTurns = rotationQuarterTurns,
+        rotationOffsetDegrees = rotationOffsetDegrees,
+        rotationGesturesEnabled = rotationGesturesEnabled,
+        onRotationGesture = onRotationGesture,
+        modifier = modifier.testTag("controlColorCalibrationCanvas"),
+    )
+}
+
 /** Zoomable control editor: drag a marker to move it and tap it to edit its metadata. */
 @Composable
 fun InteractiveControlPointCanvas(

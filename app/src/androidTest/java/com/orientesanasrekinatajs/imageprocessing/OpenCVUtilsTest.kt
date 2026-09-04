@@ -159,6 +159,61 @@ class OpenCVUtilsTest {
     }
 
     @Test
+    fun sampleControlPointColorFindsKnownRingColorAndRadius() {
+        val bitmap = Bitmap.createBitmap(220, 220, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawCircle(
+            110f,
+            110f,
+            30f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.MAGENTA
+                style = Paint.Style.STROKE
+                strokeWidth = 8f
+            },
+        )
+
+        val sample = OpenCVUtils.sampleControlPointColor(bitmap, Point2D(110f, 110f))
+
+        assertNotNull(sample)
+        assertTrue(sample!!.hueRange.contains(150.0))
+        assertTrue(sample.saturationRange.contains(255.0))
+        assertTrue(sample.valueRange.contains(255.0))
+        assertTrue(abs(sample.estimatedRadius - 34f) < 4f)
+    }
+
+    @Test
+    fun sampleControlPointColorRejectsNonCircularArea() {
+        val bitmap = Bitmap.createBitmap(220, 220, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawRect(
+            30f,
+            100f,
+            190f,
+            115f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.MAGENTA },
+        )
+
+        assertNull(OpenCVUtils.sampleControlPointColor(bitmap, Point2D(110f, 108f)))
+    }
+
+    @Test
+    fun isolateInkColorKeepsMagentaAndRemovesBlackPixels() {
+        val bitmap = Bitmap.createBitmap(200, 100, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawRect(20f, 20f, 80f, 80f, Paint().apply { color = Color.MAGENTA })
+        canvas.drawRect(120f, 20f, 180f, 80f, Paint().apply { color = Color.BLACK })
+
+        val isolated = OpenCVUtils.isolateInkColor(bitmap)
+
+        assertEquals(Color.BLACK, isolated.getPixel(50, 50))
+        assertEquals(Color.WHITE, isolated.getPixel(150, 50))
+    }
+
+    @Test
     fun reprojectPointsMovesIncludedPointsAndDropsPointsOutsideNewBoundary() {
         val oldBoundary = MapBoundary(
             Point2D(0f, 0f), Point2D(100f, 0f), Point2D(100f, 100f), Point2D(0f, 100f),

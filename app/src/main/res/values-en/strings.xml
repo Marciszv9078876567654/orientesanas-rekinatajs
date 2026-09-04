@@ -240,4 +240,7 @@
     <string name="map_transfer_error_title">Map transfer failed</string>
     <string name="map_export_failed">The map could not be exported.</string>
     <string name="map_import_failed">The selected file is not a valid exported map.</string>
+    <string name="calibrate_control_color">Calibrate from a known control</string>
+    <string name="calibrate_control_color_help">Tap a known control circle. Its color and size will be used to detect the points again.</string>
+    <string name="calibrate_control_color_failed">Calibration failed</string>
 </resources>

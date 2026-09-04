@@ -227,4 +227,7 @@
     <string name="map_transfer_error_title">Kartes pārsūtīšana neizdevās</string>
     <string name="map_export_failed">Karti neizdevās eksportēt.</string>
     <string name="map_import_failed">Izvēlētais fails nav derīga eksportēta karte.</string>
+    <string name="calibrate_control_color">Kalibrēt pēc zināma kontrolpunkta</string>
+    <string name="calibrate_control_color_help">Pieskarieties zināma kontrolpunkta aplim. Krāsa un izmērs tiks izmantoti atkārtotai punktu noteikšanai.</string>
+    <string name="calibrate_control_color_failed">Kalibrēšana neizdevās</string>
 </resources>

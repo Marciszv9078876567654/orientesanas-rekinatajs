@@ -5,12 +5,15 @@ import com.orientesanasrekinatajs.domain.model.MapBoundary
 import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.domain.model.ControlPointType
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.roundToInt
+import java.util.ArrayDeque
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Core
+import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
@@ -27,6 +30,23 @@ object OpenCVUtils {
     private const val MIN_RING_HOLE_AREA_RATIO = 0.55
     private const val MAX_RING_HOLE_AREA_RATIO = 0.85
     private const val MAX_RING_CENTER_OFFSET_RADIUS_FRACTION = 0.22
+    private const val DEFAULT_HUE_MIN = 135.0
+    private const val DEFAULT_HUE_MAX = 165.0
+    private const val DEFAULT_SATURATION_MIN = 70.0
+    private const val DEFAULT_VALUE_MIN = 70.0
+    private const val HUE_TOLERANCE = 7.5
+    private const val SATURATION_TOLERANCE_DOWN = 55.0
+    private const val SATURATION_TOLERANCE_UP = 30.0
+    private const val VALUE_TOLERANCE_DOWN = 70.0
+    private const val VALUE_TOLERANCE_UP = 40.0
+    private const val MIN_CALIBRATED_SATURATION = 35.0
+    private const val MIN_CALIBRATED_VALUE = 30.0
+    private const val SAMPLE_WINDOW_RADIUS = 64
+    private const val SAMPLE_SEED_SEARCH_RADIUS = 40
+    private const val SAMPLE_HUE_DIFFERENCE = 10.0
+    private const val SAMPLE_SATURATION_DIFFERENCE = 80.0
+    private const val SAMPLE_VALUE_DIFFERENCE = 100.0
+    private const val CALIBRATED_RADIUS_TOLERANCE = 0.50
 
     private val isOpenCvLoaded: Boolean by lazy { OpenCVLoader.initLocal() }
 
@@ -279,6 +299,7 @@ object OpenCVUtils {
     fun detectControlSymbols(
         bitmap: Bitmap,
         requireRingHole: Boolean = false,
+        colorCalibration: ColorCalibrationSample? = null,
     ): List<DetectedControlSymbol> {
         requireOpenCv()
 
@@ -295,10 +316,11 @@ object OpenCVUtils {
             Utils.bitmapToMat(bitmap, rgba)
             Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
             Imgproc.cvtColor(rgb, hsv, Imgproc.COLOR_RGB2HSV)
+            val (lowerColor, upperColor) = colorBounds(colorCalibration)
             Core.inRange(
                 hsv,
-                Scalar(135.0, 70.0, 70.0),
-                Scalar(165.0, 255.0, 255.0),
+                lowerColor,
+                upperColor,
                 mask,
             )
             Imgproc.morphologyEx(mask, closedMask, Imgproc.MORPH_CLOSE, kernel)
@@ -311,8 +333,12 @@ object OpenCVUtils {
             )
 
             val minimumDimension = minOf(bitmap.width, bitmap.height).toDouble()
-            val minimumRadius = max(4.0, minimumDimension * 0.004)
-            val maximumRadius = minimumDimension * 0.20
+            val minimumRadius = colorCalibration?.estimatedRadius?.let { radius ->
+                max(4.0, radius * (1.0 - CALIBRATED_RADIUS_TOLERANCE))
+            } ?: max(4.0, minimumDimension * 0.004)
+            val maximumRadius = colorCalibration?.estimatedRadius?.let { radius ->
+                minOf(minimumDimension * 0.20, radius * (1.0 + CALIBRATED_RADIUS_TOLERANCE))
+            } ?: (minimumDimension * 0.20)
             val allCandidates = contours.mapIndexedNotNull { index, contour ->
                 val childIndex = hierarchyEntry(hierarchy, index)?.getOrNull(2)?.toInt() ?: -1
                 val childContour = contours.getOrNull(childIndex)
@@ -428,6 +454,187 @@ object OpenCVUtils {
         }
     }
 
+    /**
+     * Samples the symbol ink connected to [tapPoint] and returns tolerant HSV/radius bounds.
+     *
+     * Hue receives the narrowest symmetric margin. Saturation and Value extend farther toward
+     * darker/lower-saturation pixels because shadows affect those channels much more than Hue.
+     */
+    fun sampleControlPointColor(
+        bitmap: Bitmap,
+        tapPoint: Point2D,
+    ): ColorCalibrationSample? {
+        requireOpenCv()
+        if (tapPoint.x !in 0f..<bitmap.width.toFloat() || tapPoint.y !in 0f..<bitmap.height.toFloat()) {
+            return null
+        }
+
+        val rgba = Mat()
+        val rgb = Mat()
+        val hsv = Mat()
+        val points = MatOfPoint2f()
+        return try {
+            Utils.bitmapToMat(bitmap, rgba)
+            Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
+            Imgproc.cvtColor(rgb, hsv, Imgproc.COLOR_RGB2HSV)
+
+            val centerX = tapPoint.x.roundToInt()
+            val centerY = tapPoint.y.roundToInt()
+            val left = (centerX - SAMPLE_WINDOW_RADIUS).coerceAtLeast(0)
+            val top = (centerY - SAMPLE_WINDOW_RADIUS).coerceAtLeast(0)
+            val right = (centerX + SAMPLE_WINDOW_RADIUS).coerceAtMost(bitmap.width - 1)
+            val bottom = (centerY + SAMPLE_WINDOW_RADIUS).coerceAtMost(bitmap.height - 1)
+            val width = right - left + 1
+            val height = bottom - top + 1
+
+            var seedX = -1
+            var seedY = -1
+            var seed: DoubleArray? = null
+            var bestSeedScore = Double.NEGATIVE_INFINITY
+            for (y in (centerY - SAMPLE_SEED_SEARCH_RADIUS).coerceAtLeast(top)..
+                (centerY + SAMPLE_SEED_SEARCH_RADIUS).coerceAtMost(bottom)) {
+                for (x in (centerX - SAMPLE_SEED_SEARCH_RADIUS).coerceAtLeast(left)..
+                    (centerX + SAMPLE_SEED_SEARCH_RADIUS).coerceAtMost(right)) {
+                    val pixel = hsv.get(y, x) ?: continue
+                    val score = pixel[1] * (0.5 + pixel[2] / 510.0)
+                    if (pixel[1] >= MIN_CALIBRATED_SATURATION &&
+                        pixel[2] >= MIN_CALIBRATED_VALUE && score > bestSeedScore
+                    ) {
+                        seedX = x
+                        seedY = y
+                        seed = pixel
+                        bestSeedScore = score
+                    }
+                }
+            }
+            val seedColor = seed ?: return null
+
+            val visited = BooleanArray(width * height)
+            val queue = ArrayDeque<Int>()
+            val sampled = mutableListOf<SamplePixel>()
+            fun enqueue(x: Int, y: Int) {
+                if (x !in left..right || y !in top..bottom) return
+                val index = (y - top) * width + (x - left)
+                if (!visited[index]) {
+                    visited[index] = true
+                    queue.addLast(index)
+                }
+            }
+            enqueue(seedX, seedY)
+            while (queue.isNotEmpty()) {
+                val index = queue.removeFirst()
+                val x = left + index % width
+                val y = top + index / width
+                val pixel = hsv.get(y, x) ?: continue
+                val hueDifference = abs(pixel[0] - seedColor[0]).let { minOf(it, 180.0 - it) }
+                if (hueDifference > SAMPLE_HUE_DIFFERENCE ||
+                    abs(pixel[1] - seedColor[1]) > SAMPLE_SATURATION_DIFFERENCE ||
+                    abs(pixel[2] - seedColor[2]) > SAMPLE_VALUE_DIFFERENCE ||
+                    pixel[1] < MIN_CALIBRATED_SATURATION || pixel[2] < MIN_CALIBRATED_VALUE
+                ) {
+                    continue
+                }
+                sampled += SamplePixel(x, y, pixel[0], pixel[1], pixel[2])
+                enqueue(x - 1, y)
+                enqueue(x + 1, y)
+                enqueue(x, y - 1)
+                enqueue(x, y + 1)
+            }
+            if (sampled.size < 20) return null
+
+            points.fromArray(*sampled.map { Point(it.x.toDouble(), it.y.toDouble()) }.toTypedArray())
+            val circleCenter = Point()
+            val radius = FloatArray(1)
+            Imgproc.minEnclosingCircle(points, circleCenter, radius)
+            val minX = sampled.minOf(SamplePixel::x)
+            val maxX = sampled.maxOf(SamplePixel::x)
+            val minY = sampled.minOf(SamplePixel::y)
+            val maxY = sampled.maxOf(SamplePixel::y)
+            val aspectRatio = (maxX - minX + 1).toDouble() / (maxY - minY + 1).coerceAtLeast(1)
+            val fillRatio = sampled.size / (PI * radius[0] * radius[0]).coerceAtLeast(1.0)
+            val tapOffset = Point2D(circleCenter.x.toFloat(), circleCenter.y.toFloat()).distanceTo(tapPoint)
+            if (radius[0] < 4f || radius[0] > SAMPLE_WINDOW_RADIUS * 0.9f ||
+                aspectRatio !in 0.65..1.35 || fillRatio !in 0.08..0.75 || tapOffset > radius[0] * 1.2f
+            ) {
+                return null
+            }
+
+            val hueRange = percentile(sampled.map(SamplePixel::hue), 0.05)..
+                percentile(sampled.map(SamplePixel::hue), 0.95)
+            val saturationRange = percentile(sampled.map(SamplePixel::saturation), 0.05)..
+                percentile(sampled.map(SamplePixel::saturation), 0.95)
+            val valueRange = percentile(sampled.map(SamplePixel::value), 0.05)..
+                percentile(sampled.map(SamplePixel::value), 0.95)
+            ColorCalibrationSample(
+                hueRange = (hueRange.start - HUE_TOLERANCE).coerceAtLeast(0.0)..
+                    (hueRange.endInclusive + HUE_TOLERANCE).coerceAtMost(179.0),
+                saturationRange = (saturationRange.start - SATURATION_TOLERANCE_DOWN)
+                    .coerceAtLeast(MIN_CALIBRATED_SATURATION)..
+                    (saturationRange.endInclusive + SATURATION_TOLERANCE_UP).coerceAtMost(255.0),
+                valueRange = (valueRange.start - VALUE_TOLERANCE_DOWN)
+                    .coerceAtLeast(MIN_CALIBRATED_VALUE)..
+                    (valueRange.endInclusive + VALUE_TOLERANCE_UP).coerceAtMost(255.0),
+                estimatedRadius = radius[0],
+            )
+        } finally {
+            points.release()
+            hsv.release()
+            rgb.release()
+            rgba.release()
+        }
+    }
+
+    /** Returns a black-on-white bitmap containing only ink in the active detection range. */
+    fun isolateInkColor(
+        bitmap: Bitmap,
+        colorCalibration: ColorCalibrationSample? = null,
+    ): Bitmap {
+        requireOpenCv()
+        val rgba = Mat()
+        val rgb = Mat()
+        val hsv = Mat()
+        val mask = Mat()
+        val isolated = Mat(bitmap.height, bitmap.width, CvType.CV_8UC4, Scalar(255.0, 255.0, 255.0, 255.0))
+        return try {
+            Utils.bitmapToMat(bitmap, rgba)
+            Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
+            Imgproc.cvtColor(rgb, hsv, Imgproc.COLOR_RGB2HSV)
+            val (lowerColor, upperColor) = colorBounds(colorCalibration)
+            Core.inRange(hsv, lowerColor, upperColor, mask)
+            isolated.setTo(Scalar(0.0, 0.0, 0.0, 255.0), mask)
+            Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888).also { output ->
+                Utils.matToBitmap(isolated, output)
+            }
+        } finally {
+            isolated.release()
+            mask.release()
+            hsv.release()
+            rgb.release()
+            rgba.release()
+        }
+    }
+
+    private fun colorBounds(calibration: ColorCalibrationSample?): Pair<Scalar, Scalar> =
+        if (calibration == null) {
+            Scalar(DEFAULT_HUE_MIN, DEFAULT_SATURATION_MIN, DEFAULT_VALUE_MIN) to
+                Scalar(DEFAULT_HUE_MAX, 255.0, 255.0)
+        } else {
+            Scalar(
+                calibration.hueRange.start,
+                calibration.saturationRange.start,
+                calibration.valueRange.start,
+            ) to Scalar(
+                calibration.hueRange.endInclusive,
+                calibration.saturationRange.endInclusive,
+                calibration.valueRange.endInclusive,
+            )
+        }
+
+    private fun percentile(values: List<Double>, fraction: Double): Double {
+        val sorted = values.sorted()
+        return sorted[((sorted.lastIndex * fraction).roundToInt()).coerceIn(sorted.indices)]
+    }
+
     /** Reads `[next, previous, firstChild, parent]` for a contour from OpenCV's hierarchy. */
     private fun hierarchyEntry(hierarchy: Mat, contourIndex: Int): DoubleArray? =
         if (hierarchy.rows() == 1) {
@@ -493,6 +700,14 @@ object OpenCVUtils {
         val hasRingHole: Boolean,
     )
 
+    private data class SamplePixel(
+        val x: Int,
+        val y: Int,
+        val hue: Double,
+        val saturation: Double,
+        val value: Double,
+    )
+
     private enum class SymbolShape { CIRCLE, TRIANGLE }
 }
 
@@ -500,4 +715,11 @@ data class DetectedControlSymbol(
     val center: Point2D,
     val radius: Float,
     val type: ControlPointType,
+)
+
+data class ColorCalibrationSample(
+    val hueRange: ClosedFloatingPointRange<Double>,
+    val saturationRange: ClosedFloatingPointRange<Double>,
+    val valueRange: ClosedFloatingPointRange<Double>,
+    val estimatedRadius: Float,
 )
