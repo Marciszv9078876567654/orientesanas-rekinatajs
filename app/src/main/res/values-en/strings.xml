@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Orienteering Calculator</string>
+    <string name="app_name">Rogaining Planner</string>
     <string name="image_source_title">Scan an orienteering map</string>
     <string name="image_source_description">Choose a clear, well-lit photo with the entire map visible.</string>
     <string name="choose_photo">Choose photo</string>

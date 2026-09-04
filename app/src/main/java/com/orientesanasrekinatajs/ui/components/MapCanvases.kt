@@ -72,7 +72,8 @@ fun InteractiveCornerCanvas(
     val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
     val lineColor = Color(0xFFFFC107)
     val handleColor = Color(0xFFE91E63)
-    val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
+    val animatedRotation = rotationQuarterTurns * 90f
+    val animatedFitQuarterTurns = animatedFitQuarterTurns(rotationQuarterTurns)
     val animationsEnabled = LocalAnimationsEnabled.current
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
@@ -165,6 +166,7 @@ fun InteractiveCornerCanvas(
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
             rotationDegrees = animatedRotation + rotationOffsetDegrees,
+            fitQuarterTurns = animatedFitQuarterTurns,
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
@@ -217,7 +219,8 @@ fun RouteRenderingCanvas(
     val activeRoute = effectiveLayers.firstOrNull(RouteRenderLayer::isActive)?.points ?: route
     val routeKey = activeRoute.joinToString(separator = ":") { it.id }
     val progress = remember { Animatable(if (animationsEnabled) 0f else 1f) }
-    val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
+    val animatedRotation = rotationQuarterTurns * 90f
+    val animatedFitQuarterTurns = animatedFitQuarterTurns(rotationQuarterTurns)
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     var isolatedRouteId by remember { mutableStateOf<String?>(null) }
@@ -324,6 +327,7 @@ fun RouteRenderingCanvas(
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
             rotationDegrees = animatedRotation + rotationOffsetDegrees,
+            fitQuarterTurns = animatedFitQuarterTurns,
         )
         val otherLayerAlpha = if (isolatedRouteId == null) {
             1f
@@ -419,7 +423,8 @@ fun DistanceCalibrationCanvas(
     val latestRotationOffset by rememberUpdatedState(rotationOffsetDegrees)
     val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
     val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
-    val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
+    val animatedRotation = rotationQuarterTurns * 90f
+    val animatedFitQuarterTurns = animatedFitQuarterTurns(rotationQuarterTurns)
     val animationsEnabled = LocalAnimationsEnabled.current
     LaunchedEffect(recenterKey) {
         if (recenterKey > 0) {
@@ -528,6 +533,7 @@ fun DistanceCalibrationCanvas(
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
             rotationDegrees = animatedRotation + rotationOffsetDegrees,
+            fitQuarterTurns = animatedFitQuarterTurns,
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
@@ -578,7 +584,8 @@ fun InteractiveControlPointCanvas(
     var pan by remember { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     val latestOnViewportCenterChange by rememberUpdatedState(onViewportCenterChange)
-    val animatedRotation = animatedRotationDegrees(rotationQuarterTurns)
+    val animatedRotation = rotationQuarterTurns * 90f
+    val animatedFitQuarterTurns = animatedFitQuarterTurns(rotationQuarterTurns)
     val animationsEnabled = LocalAnimationsEnabled.current
     LaunchedEffect(recenterKey) {
         if (recenterKey > 0) {
@@ -681,6 +688,7 @@ fun InteractiveControlPointCanvas(
         val viewport = viewportTransform(
             size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
             rotationDegrees = animatedRotation + rotationOffsetDegrees,
+            fitQuarterTurns = animatedFitQuarterTurns,
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
@@ -917,12 +925,12 @@ private data class ViewportTransform(
 }
 
 @Composable
-private fun animatedRotationDegrees(rotationQuarterTurns: Int): Float {
+private fun animatedFitQuarterTurns(rotationQuarterTurns: Int): Float {
     val animationsEnabled = LocalAnimationsEnabled.current
     return animateFloatAsState(
-        targetValue = rotationQuarterTurns * 90f,
+        targetValue = rotationQuarterTurns.toFloat(),
         animationSpec = tween(if (animationsEnabled) 180 else 0),
-        label = "mapRotation",
+        label = "mapFitQuarterTurns",
     ).value
 }
 
@@ -939,7 +947,7 @@ private suspend fun animateViewportToCenter(
     animate(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = tween(durationMillis = 320),
+        animationSpec = tween(durationMillis = 180),
     ) { progress, _ ->
         onUpdate(
             currentZoom + (1f - currentZoom) * progress,
@@ -956,6 +964,7 @@ private fun viewportTransform(
     zoom: Float,
     pan: Offset,
     rotationDegrees: Float = rotationQuarterTurns * 90f,
+    fitQuarterTurns: Float = rotationQuarterTurns.toFloat(),
 ): ViewportTransform = viewportTransform(
     canvasSize = Size(canvasSize.width.toFloat(), canvasSize.height.toFloat()),
     imageWidth = imageWidth,
@@ -964,6 +973,7 @@ private fun viewportTransform(
     zoom = zoom,
     pan = pan,
     rotationDegrees = rotationDegrees,
+    fitQuarterTurns = fitQuarterTurns,
 )
 
 private fun viewportTransform(
@@ -974,12 +984,13 @@ private fun viewportTransform(
     zoom: Float,
     pan: Offset,
     rotationDegrees: Float = rotationQuarterTurns * 90f,
+    fitQuarterTurns: Float = rotationQuarterTurns.toFloat(),
 ): ViewportTransform = ViewportTransform(
     base = fittedImageTransform(
         canvasSize = Size(canvasSize.width.toFloat(), canvasSize.height.toFloat()),
         imageWidth = imageWidth,
         imageHeight = imageHeight,
-        rotationDegrees = rotationDegrees,
+        fitQuarterTurns = fitQuarterTurns,
     ),
     center = Offset(canvasSize.width / 2f, canvasSize.height / 2f),
     rotationDegrees = rotationDegrees,
@@ -1081,14 +1092,9 @@ private fun fittedImageTransform(
     canvasSize: Size,
     imageWidth: Int,
     imageHeight: Int,
-    rotationDegrees: Float = 0f,
+    fitQuarterTurns: Float = 0f,
 ): ImageTransform {
-    val radians = Math.toRadians(rotationDegrees.toDouble())
-    val absoluteCosine = kotlin.math.abs(cos(radians)).toFloat()
-    val absoluteSine = kotlin.math.abs(sin(radians)).toFloat()
-    val rotatedWidth = imageWidth * absoluteCosine + imageHeight * absoluteSine
-    val rotatedHeight = imageWidth * absoluteSine + imageHeight * absoluteCosine
-    val scale = min(canvasSize.width / rotatedWidth, canvasSize.height / rotatedHeight)
+    val scale = interpolatedCardinalFitScale(canvasSize, imageWidth, imageHeight, fitQuarterTurns)
     val width = imageWidth * scale
     val height = imageHeight * scale
     return ImageTransform(
@@ -1098,6 +1104,31 @@ private fun fittedImageTransform(
         imageWidth = imageWidth,
         imageHeight = imageHeight,
     )
+}
+
+internal fun interpolatedCardinalFitScale(
+    canvasSize: Size,
+    imageWidth: Int,
+    imageHeight: Int,
+    fitQuarterTurns: Float,
+): Float {
+    val lowerQuarterTurn = kotlin.math.floor(fitQuarterTurns).toInt()
+    val fraction = fitQuarterTurns - lowerQuarterTurn
+    val lowerScale = cardinalFitScale(canvasSize, imageWidth, imageHeight, lowerQuarterTurn)
+    val upperScale = cardinalFitScale(canvasSize, imageWidth, imageHeight, lowerQuarterTurn + 1)
+    return lowerScale + (upperScale - lowerScale) * fraction
+}
+
+private fun cardinalFitScale(
+    canvasSize: Size,
+    imageWidth: Int,
+    imageHeight: Int,
+    quarterTurns: Int,
+): Float {
+    val swapsDimensions = quarterTurns.mod(2) != 0
+    val rotatedWidth = if (swapsDimensions) imageHeight else imageWidth
+    val rotatedHeight = if (swapsDimensions) imageWidth else imageHeight
+    return min(canvasSize.width / rotatedWidth, canvasSize.height / rotatedHeight)
 }
 
 private fun DrawScope.drawFittedImage(image: ImageBitmap, transform: ImageTransform) {

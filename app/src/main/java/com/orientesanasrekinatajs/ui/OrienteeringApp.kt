@@ -7,10 +7,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -94,6 +92,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -177,6 +176,8 @@ import java.util.Date
 import kotlin.math.hypot
 import kotlin.math.floor
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 @Composable
 fun OrienteeringApp(
@@ -222,6 +223,8 @@ fun OrienteeringApp(
     modifier: Modifier = Modifier,
 ) {
     val focusManager = LocalFocusManager.current
+    val animationsEnabled = LocalAnimationsEnabled.current
+    val rotationAnimationScope = rememberCoroutineScope()
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showRecentMaps by rememberSaveable { mutableStateOf(false) }
     var usageTipDismissedForUri by rememberSaveable { mutableStateOf<String?>(null) }
@@ -236,19 +239,41 @@ fun OrienteeringApp(
         mutableIntStateOf(processingState.savedRotationQuarterTurns)
     }
     var mapRotationOffsetDegrees by rememberSaveable(rotationSessionKey) { mutableFloatStateOf(0f) }
+    var rotationAnimationJob by remember(rotationSessionKey) { mutableStateOf<Job?>(null) }
     val applyRotationGesture: (Float) -> Unit = { change ->
         if (userPreferences.disableMapRotationGestures && change.isFinite()) {
+            rotationAnimationJob?.cancel()
+            rotationAnimationJob = null
             mapRotationOffsetDegrees = (mapRotationOffsetDegrees + change) % 360f
         }
     }
-    val snapMapRotation: () -> Unit = {
-        mapRotation = nearestQuarterTurn(mapRotation, mapRotationOffsetDegrees)
-        mapRotationOffsetDegrees = 0f
-    }
-    val setMapRotation: (Int) -> Unit = { quarterTurns ->
+    val animateMapRotationTo: (Int) -> Unit = { quarterTurns ->
+        rotationAnimationJob?.cancel()
+        val startingOffset = rotationOffsetPreservingAngle(
+            mapRotation,
+            mapRotationOffsetDegrees,
+            quarterTurns,
+        )
         mapRotation = quarterTurns
-        mapRotationOffsetDegrees = 0f
+        mapRotationOffsetDegrees = startingOffset
+        if (!animationsEnabled) {
+            mapRotationOffsetDegrees = 0f
+            rotationAnimationJob = null
+        } else {
+            rotationAnimationJob = rotationAnimationScope.launch {
+                animate(
+                    initialValue = startingOffset,
+                    targetValue = 0f,
+                    animationSpec = tween(180),
+                ) { value, _ -> mapRotationOffsetDegrees = value }
+                rotationAnimationJob = null
+            }
+        }
     }
+    val snapMapRotation: () -> Unit = {
+        animateMapRotationTo(nearestQuarterTurn(mapRotation, mapRotationOffsetDegrees))
+    }
+    val setMapRotation: (Int) -> Unit = animateMapRotationTo
     val statusBarColor = MaterialTheme.colorScheme.surfaceContainer
     val view = LocalView.current
     SideEffect {
@@ -541,6 +566,13 @@ internal fun nearestQuarterTurn(
     rotationQuarterTurns: Int,
     rotationOffsetDegrees: Float,
 ): Int = ((rotationQuarterTurns * 90f + rotationOffsetDegrees) / 90f).roundToInt()
+
+/** Re-bases a free rotation onto a new quarter turn without changing its visible angle. */
+internal fun rotationOffsetPreservingAngle(
+    currentQuarterTurns: Int,
+    currentOffsetDegrees: Float,
+    targetQuarterTurns: Int,
+): Float = currentQuarterTurns * 90f + currentOffsetDegrees - targetQuarterTurns * 90f
 
 @Composable
 private fun MapFlowScreen(
@@ -1703,6 +1735,28 @@ private fun RouteScreen(
             )
         }
     }
+    val mapActionsMarginPx = with(density) { 6.dp.roundToPx() }
+    val mapActionsPositionProvider = remember(mapActionsMarginPx) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect,
+                windowSize: IntSize,
+                layoutDirection: LayoutDirection,
+                popupContentSize: IntSize,
+            ): IntOffset {
+                val maximumX = (windowSize.width - popupContentSize.width - mapActionsMarginPx)
+                    .coerceAtLeast(mapActionsMarginPx)
+                val maximumY = (windowSize.height - popupContentSize.height - mapActionsMarginPx)
+                    .coerceAtLeast(mapActionsMarginPx)
+                return IntOffset(
+                    x = (anchorBounds.right - popupContentSize.width - mapActionsMarginPx)
+                        .coerceIn(mapActionsMarginPx, maximumX),
+                    y = (anchorBounds.bottom + mapActionsMarginPx)
+                        .coerceIn(mapActionsMarginPx, maximumY),
+                )
+            }
+        }
+    }
     var showDetails by rememberSaveable { mutableStateOf(false) }
     var routeDetailsPanelState by rememberSaveable {
         mutableStateOf(RouteDetailsPanelState.HALF)
@@ -1872,46 +1926,83 @@ private fun RouteScreen(
                     IconButton(onClick = { showMapActions = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.map_actions))
                     }
-                    DropdownMenu(
-                        expanded = showMapActions,
-                        onDismissRequest = { showMapActions = false },
-                        modifier = Modifier.offset(x = (-8).dp, y = 8.dp),
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.rename_route)) },
-                            leadingIcon = {
-                                Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null)
-                            },
-                            enabled = savedMapId != null,
-                            onClick = { showMapActions = false; showRename = true },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.save_map)) },
-                            leadingIcon = { Icon(Icons.Default.Save, contentDescription = null) },
-                            enabled = canSave && !isSaving,
-                            onClick = { showMapActions = false; showSaveConfirmation = true },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.delete_saved_route)) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            enabled = savedMapId != null && !isDirty,
-                            onClick = { showMapActions = false; showDeleteConfirmation = true },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.edit_map)) },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = {
-                                showMapActions = false
-                                if (availableRoutes.isNotEmpty()) showEditMapRouteWarning = true else onEdit()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.export_map)) },
-                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
-                            enabled = canSave && !isExporting,
-                            onClick = { showMapActions = false; onExport() },
-                        )
+                    if (showMapActions) {
+                        Popup(
+                            popupPositionProvider = mapActionsPositionProvider,
+                            onDismissRequest = { showMapActions = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            MapDropdownContent {
+                                Surface(
+                                    modifier = Modifier.width(IntrinsicSize.Max),
+                                    shape = MaterialTheme.shapes.extraSmall,
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    tonalElevation = 3.dp,
+                                    shadowElevation = 8.dp,
+                                ) {
+                                    Column {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.rename_route)) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.DriveFileRenameOutline,
+                                                    contentDescription = null,
+                                                )
+                                            },
+                                            enabled = savedMapId != null,
+                                            onClick = { showMapActions = false; showRename = true },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.save_map)) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Save, contentDescription = null)
+                                            },
+                                            enabled = canSave && !isSaving,
+                                            onClick = {
+                                                showMapActions = false
+                                                showSaveConfirmation = true
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(stringResource(R.string.delete_saved_route))
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Delete, contentDescription = null)
+                                            },
+                                            enabled = savedMapId != null && !isDirty,
+                                            onClick = {
+                                                showMapActions = false
+                                                showDeleteConfirmation = true
+                                            },
+                                        )
+                                        HorizontalDivider()
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.edit_map)) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Edit, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showMapActions = false
+                                                if (availableRoutes.isNotEmpty()) {
+                                                    showEditMapRouteWarning = true
+                                                } else {
+                                                    onEdit()
+                                                }
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.export_map)) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Share, contentDescription = null)
+                                            },
+                                            enabled = canSave && !isExporting,
+                                            onClick = { showMapActions = false; onExport() },
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2016,7 +2107,7 @@ private fun RouteScreen(
                             onDismissRequest = { showRouteMenu = false },
                             properties = PopupProperties(focusable = true),
                         ) {
-                            AnimatedRouteMenu {
+                            MapDropdownContent {
                                 Surface(
                                     modifier = Modifier.width(IntrinsicSize.Max),
                                     shape = MaterialTheme.shapes.extraSmall,
@@ -2335,15 +2426,16 @@ private fun RouteScreen(
 }
 
 @Composable
-private fun AnimatedRouteMenu(content: @Composable () -> Unit) {
+private fun MapDropdownContent(content: @Composable () -> Unit) {
+    val animationsEnabled = LocalAnimationsEnabled.current
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(120)) +
-            scaleIn(tween(160), initialScale = 0.86f) +
-            expandVertically(tween(160), expandFrom = Alignment.Bottom),
-    ) {
+    val opacity by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(if (animationsEnabled) 90 else 0),
+        label = "mapDropdownOpacity",
+    )
+    Box(Modifier.graphicsLayer { alpha = opacity }) {
         content()
     }
 }

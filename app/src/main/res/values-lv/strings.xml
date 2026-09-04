@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Orientēšanās Rēķinātājs</string>
+    <string name="app_name">Rogaininga Plānotājs</string>
     <string name="image_source_title">Skenēt orientēšanās karti</string>
     <string name="image_source_description">Izvēlieties skaidru, labi apgaismotu attēlu, kurā redzama visa karte.</string>
     <string name="choose_photo">Izvēlēties attēlu</string>

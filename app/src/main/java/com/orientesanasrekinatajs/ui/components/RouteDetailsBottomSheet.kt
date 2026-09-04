@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -110,7 +111,7 @@ fun RouteDetailsBottomSheet(
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val density = LocalDensity.current
         val minimizedHeight = if (showPointsPerKilometer) 160.dp else 136.dp
-        val routeTabMinimumHeight = if (showPointsPerKilometer) 92.dp else 48.dp
+        val routeTabMinimumHeight = if (showPointsPerKilometer) 104.dp else 48.dp
         val minimumHeightPx = with(density) { minimizedHeight.toPx() }
         val maximumHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(minimumHeightPx)
         val halfHeightPx = (constraints.maxHeight * 0.5f).coerceIn(
@@ -161,13 +162,20 @@ fun RouteDetailsBottomSheet(
         }
         val topCorner = 28.dp * (1f - fullScreenProgress)
         Surface(
-            modifier = Modifier.fillMaxWidth().height(with(density) { panelHeightPx.toDp() }),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(with(density) { panelHeightPx.toDp() }),
             shape = RoundedCornerShape(topStart = topCorner, topEnd = topCorner),
             color = MaterialTheme.colorScheme.surfaceContainer,
             tonalElevation = 3.dp,
             shadowElevation = 8.dp * (1f - fullScreenProgress),
         ) {
-        Column(Modifier.fillMaxHeight()) {
+        Column(
+            Modifier
+                .fillMaxHeight()
+                .clipToBounds()
+                .minimumContentHeightPx { minimumHeightPx },
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -465,8 +473,12 @@ fun RouteEditorBottomSheet(
         }
         val swipeThresholdPx = with(density) { 28.dp.toPx() }
         val flickVelocityThresholdPx = with(density) { 320.dp.toPx() }
-        val isFullScreen = panelState == RouteEditorPanelState.EXPANDED
-        val topCorner = if (isFullScreen) 0.dp else 28.dp
+        val fullScreenProgress = if (maximumHeightPx > halfHeightPx) {
+            ((panelHeightPx - halfHeightPx) / (maximumHeightPx - halfHeightPx)).coerceIn(0f, 1f)
+        } else {
+            1f
+        }
+        val topCorner = 28.dp * (1f - fullScreenProgress)
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -474,7 +486,7 @@ fun RouteEditorBottomSheet(
             shape = RoundedCornerShape(topStart = topCorner, topEnd = topCorner),
             color = MaterialTheme.colorScheme.surfaceContainer,
             tonalElevation = 3.dp,
-            shadowElevation = if (isFullScreen) 0.dp else 8.dp,
+            shadowElevation = 8.dp * (1f - fullScreenProgress),
         ) {
         Column(Modifier.fillMaxHeight()) {
         Column(
@@ -786,6 +798,17 @@ private fun Modifier.dynamicHeightPx(heightPx: () -> Float): Modifier = layout {
     )
     layout(placeable.width, height) { placeable.placeRelative(0, 0) }
 }
+
+/** Keeps dismissing panel content at its natural height while its visible background shrinks. */
+private fun Modifier.minimumContentHeightPx(minimumHeightPx: () -> Float): Modifier =
+    layout { measurable, constraints ->
+        val visibleHeight = constraints.maxHeight
+        val contentHeight = maxOf(visibleHeight, minimumHeightPx().roundToInt())
+        val placeable = measurable.measure(
+            constraints.copy(minHeight = contentHeight, maxHeight = contentHeight),
+        )
+        layout(placeable.width, visibleHeight) { placeable.placeRelative(0, 0) }
+    }
 
 /** Scrollable tabular representation used by the route details bottom sheet. */
 @Composable

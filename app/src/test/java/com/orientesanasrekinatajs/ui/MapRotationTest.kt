@@ -1,5 +1,7 @@
 package com.orientesanasrekinatajs.ui
 
+import androidx.compose.ui.geometry.Size
+import com.orientesanasrekinatajs.ui.components.interpolatedCardinalFitScale
 import com.orientesanasrekinatajs.ui.components.pinnedRouteStrokeWidth
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -21,6 +23,30 @@ class MapRotationTest {
         assertEquals(1, nearestQuarterTurn(0, 50f))
         assertEquals(0, nearestQuarterTurn(0, -30f))
         assertEquals(-1, nearestQuarterTurn(0, -50f))
+    }
+
+    @Test
+    fun mapFitInterpolatesDirectlyBetweenCardinalScales() {
+        val landscapeScale = interpolatedCardinalFitScale(Size(400f, 700f), 800, 400, 0f)
+        val halfwayScale = interpolatedCardinalFitScale(Size(400f, 700f), 800, 400, 0.5f)
+        val rotatedScale = interpolatedCardinalFitScale(Size(400f, 700f), 800, 400, 1f)
+
+        assertEquals(0.5f, landscapeScale, 0.001f)
+        assertEquals(0.6875f, halfwayScale, 0.001f)
+        assertEquals(0.875f, rotatedScale, 0.001f)
+        assertTrue(halfwayScale in landscapeScale..rotatedScale)
+    }
+
+    @Test
+    fun quarterTurnAnimationStartsAtTheCurrentManualAngle() {
+        val offset = rotationOffsetPreservingAngle(
+            currentQuarterTurns = 0,
+            currentOffsetDegrees = 30f,
+            targetQuarterTurns = 1,
+        )
+
+        assertEquals(-60f, offset, 0.001f)
+        assertEquals(30f, 90f + offset, 0.001f)
     }
 
     @Test
