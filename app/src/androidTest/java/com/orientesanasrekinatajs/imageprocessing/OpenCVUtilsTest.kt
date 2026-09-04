@@ -103,6 +103,62 @@ class OpenCVUtilsTest {
     }
 
     @Test
+    fun strictRingDetectionAcceptsAnnulusAndRejectsFilledCircle() {
+        val bitmap = Bitmap.createBitmap(360, 180, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.MAGENTA
+            style = Paint.Style.STROKE
+            strokeWidth = 8f
+        }
+        canvas.drawCircle(90f, 90f, 30f, stroke)
+        canvas.drawCircle(
+            270f,
+            90f,
+            30f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.MAGENTA },
+        )
+
+        val symbols = OpenCVUtils.detectControlSymbols(bitmap, requireRingHole = true)
+
+        assertEquals(symbols.toString(), 1, symbols.size)
+        assertTrue(symbols.single().center.distanceTo(Point2D(90f, 90f)) < 4f)
+    }
+
+    @Test
+    fun hierarchyFilteringRejectsThickDigitLoopsBesideARealRing() {
+        val bitmap = Bitmap.createBitmap(420, 200, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawCircle(
+            90f,
+            100f,
+            30f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.MAGENTA
+                style = Paint.Style.STROKE
+                strokeWidth = 8f
+            },
+        )
+        canvas.drawText(
+            "8",
+            245f,
+            135f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.MAGENTA
+                textSize = 100f
+                style = Paint.Style.FILL
+            },
+        )
+
+        val symbols = OpenCVUtils.detectControlSymbols(bitmap)
+
+        assertEquals(symbols.toString(), 1, symbols.size)
+        assertTrue(symbols.single().center.distanceTo(Point2D(90f, 100f)) < 4f)
+    }
+
+    @Test
     fun reprojectPointsMovesIncludedPointsAndDropsPointsOutsideNewBoundary() {
         val oldBoundary = MapBoundary(
             Point2D(0f, 0f), Point2D(100f, 0f), Point2D(100f, 100f), Point2D(0f, 100f),

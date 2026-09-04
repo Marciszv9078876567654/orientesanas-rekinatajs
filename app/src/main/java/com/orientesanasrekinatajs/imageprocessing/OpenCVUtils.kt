@@ -24,6 +24,9 @@ object OpenCVUtils {
     private const val MAX_PROCESSING_DIMENSION = 3_000.0
     private const val MIN_BOUNDARY_AREA_FRACTION = 0.05
     private const val QUADRILATERAL_EPSILON_FACTOR = 0.02
+    private const val MIN_RING_HOLE_AREA_RATIO = 0.55
+    private const val MAX_RING_HOLE_AREA_RATIO = 0.85
+    private const val MAX_RING_CENTER_OFFSET_RADIUS_FRACTION = 0.22
 
     private val isOpenCvLoaded: Boolean by lazy { OpenCVLoader.initLocal() }
 
@@ -265,8 +268,18 @@ object OpenCVUtils {
     fun detectControlPoints(bitmap: Bitmap): List<Point2D> =
         detectControlSymbols(bitmap).map(DetectedControlSymbol::center)
 
-    /** Detects control centers together with the symbol type needed by routing orchestration. */
-    fun detectControlSymbols(bitmap: Bitmap): List<DetectedControlSymbol> {
+    /**
+     * Detects control centers together with the symbol type needed by routing orchestration.
+     *
+     * [requireRingHole] is intended for diagnostics and tests. By default, hierarchy-backed
+     * rings are preferred whenever any are found, but strong shape-only circles remain as a
+     * whole-image fallback when photography or morphology has closed every ring hole. This
+     * avoids restoring the original all-points-missed failure mode on degraded photos.
+     */
+    fun detectControlSymbols(
+        bitmap: Bitmap,
+        requireRingHole: Boolean = false,
+    ): List<DetectedControlSymbol> {
         requireOpenCv()
 
         val rgba = Mat()
@@ -300,8 +313,18 @@ object OpenCVUtils {
             val minimumDimension = minOf(bitmap.width, bitmap.height).toDouble()
             val minimumRadius = max(4.0, minimumDimension * 0.004)
             val maximumRadius = minimumDimension * 0.20
-            val candidates = contours.mapNotNull { contour ->
-                symbolCandidate(contour, minimumRadius, maximumRadius)
+            val allCandidates = contours.mapIndexedNotNull { index, contour ->
+                val childIndex = hierarchyEntry(hierarchy, index)?.getOrNull(2)?.toInt() ?: -1
+                val childContour = contours.getOrNull(childIndex)
+                symbolCandidate(contour, childContour, minimumRadius, maximumRadius)
+            }
+            val hasHierarchyBackedCircle = allCandidates.any { candidate ->
+                candidate.shape == SymbolShape.CIRCLE && candidate.hasRingHole
+            }
+            val candidates = allCandidates.filter { candidate ->
+                candidate.shape == SymbolShape.TRIANGLE ||
+                    candidate.hasRingHole ||
+                    (!requireRingHole && !hasHierarchyBackedCircle)
             }.sortedByDescending(SymbolCandidate::radius)
 
             val symbolGroups = mutableListOf<MutableList<SymbolCandidate>>()
@@ -358,6 +381,7 @@ object OpenCVUtils {
 
     private fun symbolCandidate(
         contour: MatOfPoint,
+        childContour: MatOfPoint?,
         minimumRadius: Double,
         maximumRadius: Double,
     ): SymbolCandidate? {
@@ -394,11 +418,48 @@ object OpenCVUtils {
                 center = Point2D(center.x.toFloat(), center.y.toFloat()),
                 radius = radius[0],
                 shape = if (isCircle) SymbolShape.CIRCLE else SymbolShape.TRIANGLE,
+                hasRingHole = isCircle && childContour?.let { child ->
+                    hasConcentricRingHole(contour, child, radius[0])
+                } == true,
             )
         } finally {
             approximation.release()
             contour2f.release()
         }
+    }
+
+    /** Reads `[next, previous, firstChild, parent]` for a contour from OpenCV's hierarchy. */
+    private fun hierarchyEntry(hierarchy: Mat, contourIndex: Int): DoubleArray? =
+        if (hierarchy.rows() == 1) {
+            hierarchy.get(0, contourIndex)
+        } else {
+            hierarchy.get(contourIndex, 0)
+        }
+
+    /** Returns whether [childContour] is a large, centered hole inside [outerContour]. */
+    private fun hasConcentricRingHole(
+        outerContour: MatOfPoint,
+        childContour: MatOfPoint,
+        outerRadius: Float,
+    ): Boolean {
+        val outerArea = Imgproc.contourArea(outerContour)
+        if (outerArea <= 0.0) return false
+        val holeAreaRatio = Imgproc.contourArea(childContour) / outerArea
+        if (holeAreaRatio !in MIN_RING_HOLE_AREA_RATIO..MAX_RING_HOLE_AREA_RATIO) return false
+
+        val outerMoments = Imgproc.moments(outerContour)
+        val childMoments = Imgproc.moments(childContour)
+        if (outerMoments.m00 == 0.0 || childMoments.m00 == 0.0) return false
+        val centerOffset = Point2D(
+            (outerMoments.m10 / outerMoments.m00).toFloat(),
+            (outerMoments.m01 / outerMoments.m00).toFloat(),
+        ).distanceTo(
+            Point2D(
+                (childMoments.m10 / childMoments.m00).toFloat(),
+                (childMoments.m01 / childMoments.m00).toFloat(),
+            ),
+        )
+        return centerOffset <= outerRadius * MAX_RING_CENTER_OFFSET_RADIUS_FRACTION
     }
 
     private fun orderedBoundary(points: List<Point>): MapBoundary {
@@ -429,6 +490,7 @@ object OpenCVUtils {
         val center: Point2D,
         val radius: Float,
         val shape: SymbolShape,
+        val hasRingHole: Boolean,
     )
 
     private enum class SymbolShape { CIRCLE, TRIANGLE }
