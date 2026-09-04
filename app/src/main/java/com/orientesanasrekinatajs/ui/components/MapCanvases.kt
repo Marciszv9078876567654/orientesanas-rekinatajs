@@ -732,18 +732,28 @@ private fun DrawScope.drawRouteLines(
     val lengths = points.zipWithNext { first, second ->
         hypot(second.x - first.x, second.y - first.y)
     }
+    val pathEffect = dashIntervals?.let { PathEffect.dashPathEffect(it) }
     var remaining = lengths.sum() * progress.coerceIn(0f, 1f)
     points.zipWithNext().forEachIndexed { index, (start, end) ->
         if (remaining <= 0f) return
         val length = lengths[index]
         val fraction = if (length == 0f) 1f else (remaining / length).coerceAtMost(1f)
+        val visibleEnd = start + (end - start) * fraction
+        drawLine(
+            color = Color.Black.copy(alpha = ROUTE_SHADOW_ALPHA * color.alpha),
+            start = start + ROUTE_SHADOW_OFFSET,
+            end = visibleEnd + ROUTE_SHADOW_OFFSET,
+            strokeWidth = strokeWidth + ROUTE_SHADOW_WIDTH_EXTRA_PX,
+            cap = StrokeCap.Round,
+            pathEffect = pathEffect,
+        )
         drawLine(
             color = color,
             start = start,
-            end = start + (end - start) * fraction,
+            end = visibleEnd,
             strokeWidth = strokeWidth,
             cap = StrokeCap.Round,
-            pathEffect = dashIntervals?.let { PathEffect.dashPathEffect(it) },
+            pathEffect = pathEffect,
         )
         remaining -= length
     }
@@ -1165,3 +1175,6 @@ private const val ROUTE_LONG_PRESS_RADIUS_PX = 32f
 private const val MIN_PINNED_ROUTE_STROKE_WIDTH = 3f
 private const val MAX_PINNED_ROUTE_STROKE_WIDTH = 7f
 private const val SINGLE_PINNED_ROUTE_STROKE_WIDTH = 4f
+private val ROUTE_SHADOW_OFFSET = Offset(1.5f, 1.5f)
+private const val ROUTE_SHADOW_ALPHA = 0.26f
+private const val ROUTE_SHADOW_WIDTH_EXTRA_PX = 2f
