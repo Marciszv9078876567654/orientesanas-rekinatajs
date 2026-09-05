@@ -3,6 +3,7 @@ package com.orientesanasrekinatajs.ui
 import androidx.compose.ui.geometry.Size
 import com.orientesanasrekinatajs.ui.components.interpolatedCardinalFitScale
 import com.orientesanasrekinatajs.ui.components.pinnedRouteStrokeWidth
+import com.orientesanasrekinatajs.ui.components.controlMarkerScale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -58,5 +59,12 @@ class MapRotationTest {
         assertTrue(widths.zipWithNext().all { (higher, lower) -> higher < lower })
         assertTrue(widths.all { it in 3f..7f })
         assertEquals(4f, pinnedRouteStrokeWidth(0, 1), 0.001f)
+    }
+
+    @Test
+    fun controlMarkersGrowAtTheSameRateAsMapSpaceLines() {
+        assertEquals(1f, controlMarkerScale(1f), 0.001f)
+        assertEquals(3f, controlMarkerScale(3f), 0.001f)
+        assertEquals(12f, controlMarkerScale(12f), 0.001f)
     }
 }

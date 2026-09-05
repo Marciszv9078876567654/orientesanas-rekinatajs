@@ -561,7 +561,7 @@ fun DistanceCalibrationCanvas(
         // Keep the overview and point editor visually identical: green start, red finish,
         // purple combined start/finish, pink controls, and orange review points.
         drawReferencePoints(controlPoints, viewport, zoom, useTypeColors = true)
-        val selectionScale = sqrt(zoom).coerceAtMost(2.4f)
+        val selectionScale = controlMarkerScale(zoom)
         selectionPoints.forEach { point ->
             val center = viewport.toCanvas(point)
             drawCircle(Color.White, radius = 12f * selectionScale, center = center)
@@ -686,7 +686,12 @@ fun InteractiveControlPointCanvas(
                     )
                     var selectedId = latestPoints
                         .map { it.id to (initialViewport.toCanvas(it.center) - down.position).getDistance() }
-                        .filter { (_, distance) -> distance <= CORNER_TOUCH_RADIUS_PX }
+                        .filter { (_, distance) ->
+                            distance <= maxOf(
+                                CORNER_TOUCH_RADIUS_PX,
+                                CONTROL_POINT_OUTER_RADIUS_PX * controlMarkerScale(zoom),
+                            )
+                        }
                         .minByOrNull { (_, distance) -> distance }
                         ?.first
                     var moved = 0f
@@ -759,7 +764,7 @@ fun InteractiveControlPointCanvas(
             drawFittedImage(image, viewport.base)
         }
         if (selectionMarkerStyle) {
-            val selectionScale = sqrt(zoom).coerceAtMost(2.4f)
+            val selectionScale = controlMarkerScale(zoom)
             points.forEach { point ->
                 val center = viewport.toCanvas(point.center)
                 drawCircle(Color.White, radius = 12f * selectionScale, center = center)
@@ -897,7 +902,7 @@ private fun DrawScope.drawReferencePoints(
     highlightedPointColors: Map<String, Color> = emptyMap(),
     pointAlpha: (ControlPoint) -> Float = { 1f },
 ) {
-    val pointScale = sqrt(zoom).coerceAtMost(2.4f)
+    val pointScale = controlMarkerScale(zoom)
     val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.rgb(0, 73, 87)
         textSize = 18f * pointScale
@@ -939,7 +944,7 @@ private fun DrawScope.drawReferencePoints(
             color = Color.White.copy(
                 alpha = (if (isMuted) 0.65f else 1f) * visibilityAlpha,
             ),
-            radius = 13f * pointScale,
+            radius = CONTROL_POINT_OUTER_RADIUS_PX * pointScale,
             center = center,
         )
         drawCircle(
@@ -950,7 +955,7 @@ private fun DrawScope.drawReferencePoints(
         if (point.needsReview) {
             drawCircle(
                 color = Color(0xFFFFA000).copy(alpha = visibilityAlpha),
-                radius = 13f * pointScale,
+                radius = CONTROL_POINT_OUTER_RADIUS_PX * pointScale,
                 center = center,
                 style = Stroke(
                     width = 3f * pointScale,
@@ -964,7 +969,7 @@ private fun DrawScope.drawReferencePoints(
             ControlPointType.START_FINISH -> "S/F"
             ControlPointType.CONTROL -> if (point.needsReview) "?" else point.code.toString()
         }
-        val labelX = center.x + 13f * pointScale
+        val labelX = center.x + CONTROL_POINT_OUTER_RADIUS_PX * pointScale
         val labelY = center.y - 10f * pointScale
         drawContext.canvas.nativeCanvas.drawText(label, labelX, labelY, outlinePaint)
         drawContext.canvas.nativeCanvas.drawText(
@@ -1035,6 +1040,9 @@ private data class ViewportTransform(
         return base.toImage(unrotated)
     }
 }
+
+/** Matches the scale applied to map-space route strokes while keeping labels upright. */
+internal fun controlMarkerScale(zoom: Float): Float = zoom.coerceAtLeast(1f)
 
 @Composable
 private fun animatedFitQuarterTurns(rotationQuarterTurns: Int): Float {
@@ -1272,6 +1280,7 @@ internal fun updateBoundaryCorner(
 }
 
 private const val CORNER_TOUCH_RADIUS_PX = 56f
+private const val CONTROL_POINT_OUTER_RADIUS_PX = 13f
 private const val TAP_SLOP_PX = 12f
 private const val ROUTE_LONG_PRESS_RADIUS_PX = 32f
 private const val MIN_PINNED_ROUTE_STROKE_WIDTH = 3f
