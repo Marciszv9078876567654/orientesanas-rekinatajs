@@ -558,7 +558,9 @@ fun DistanceCalibrationCanvas(
                 drawCircle(Color(0xFFE91E63), radius = 10f / pointScale, center = point)
             }
         }
-        drawReferencePoints(controlPoints, viewport, zoom, useTypeColors = false)
+        // Keep the overview and point editor visually identical: green start, red finish,
+        // purple combined start/finish, pink controls, and orange review points.
+        drawReferencePoints(controlPoints, viewport, zoom, useTypeColors = true)
         val selectionScale = sqrt(zoom).coerceAtMost(2.4f)
         selectionPoints.forEach { point ->
             val center = viewport.toCanvas(point)
