@@ -261,6 +261,16 @@ class MapProcessingViewModel internal constructor(
                         error = null,
                     )
                     val detected = detectControlPoints(rectified, sample)
+                    if (detected.isEmpty()) {
+                        _uiState.value = current.copy(
+                            colorCalibration = sample,
+                            isCalibratingColor = true,
+                            stage = MapProcessingStage.COMPLETE,
+                            error = "Color sampled, but no matching control circles were found. " +
+                                "Try another clear control.",
+                        )
+                        return@withContext
+                    }
                     val proximity = (sample.estimatedRadius * 0.75f).coerceAtLeast(6f)
                     // Calibration can happen after manual correction. Preserve every existing
                     // point and only add detections that are not already represented nearby.

@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.orientesanasrekinatajs.domain.model.MapBoundary
 import com.orientesanasrekinatajs.domain.model.Point2D
@@ -156,6 +157,25 @@ class OpenCVUtilsTest {
 
         assertEquals(symbols.toString(), 1, symbols.size)
         assertTrue(symbols.single().center.distanceTo(Point2D(90f, 100f)) < 4f)
+    }
+
+    @Test
+    fun detectionKeepsInterruptedRingWhenIntactRingEstablishesItsSize() {
+        val bitmap = Bitmap.createBitmap(420, 200, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.MAGENTA
+            style = Paint.Style.STROKE
+            strokeWidth = 6f
+        }
+        canvas.drawCircle(90f, 100f, 30f, stroke)
+        canvas.drawArc(RectF(240f, 70f, 300f, 130f), 25f, 305f, false, stroke)
+
+        val symbols = OpenCVUtils.detectControlSymbols(bitmap)
+
+        assertEquals(symbols.toString(), 2, symbols.size)
+        assertTrue(symbols.any { it.center.distanceTo(Point2D(270f, 100f)) < 5f })
     }
 
     @Test

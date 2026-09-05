@@ -570,13 +570,14 @@ fun ControlColorCalibrationCanvas(
     onRotationGesture: (Float) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    var selectedPoint by remember(bitmap) { mutableStateOf<Point2D?>(null) }
     DistanceCalibrationCanvas(
         bitmap = bitmap,
-        start = selectedPoint,
+        // Keep this as a one-tap surface. Retaining the first failed tap as `start` makes
+        // DistanceCalibrationCanvas interpret every later tap as the unused line endpoint and
+        // resubmit the old location, so the user can never correct an imprecise first tap.
+        start = null,
         end = null,
         onLineChange = { point, _ ->
-            selectedPoint = point
             point?.let(onPointSelected)
         },
         rotationQuarterTurns = rotationQuarterTurns,

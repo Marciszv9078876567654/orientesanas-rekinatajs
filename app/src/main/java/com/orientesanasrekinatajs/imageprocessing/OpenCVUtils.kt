@@ -9,7 +9,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.roundToInt
-import java.util.ArrayDeque
+import kotlin.math.sqrt
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Core
@@ -27,13 +27,14 @@ object OpenCVUtils {
     private const val MAX_PROCESSING_DIMENSION = 3_000.0
     private const val MIN_BOUNDARY_AREA_FRACTION = 0.05
     private const val QUADRILATERAL_EPSILON_FACTOR = 0.02
-    private const val MIN_RING_HOLE_AREA_RATIO = 0.55
-    private const val MAX_RING_HOLE_AREA_RATIO = 0.85
-    private const val MAX_RING_CENTER_OFFSET_RADIUS_FRACTION = 0.22
-    private const val DEFAULT_HUE_MIN = 135.0
-    private const val DEFAULT_HUE_MAX = 165.0
-    private const val DEFAULT_SATURATION_MIN = 70.0
-    private const val DEFAULT_VALUE_MIN = 70.0
+    private const val MIN_RING_HOLE_AREA_RATIO = 0.35
+    private const val MAX_RING_HOLE_AREA_RATIO = 0.95
+    private const val MAX_RING_CENTER_OFFSET_RADIUS_FRACTION = 0.30
+    // Printed course ink is commonly much paler than its digital source, especially in photos.
+    private const val DEFAULT_HUE_MIN = 125.0
+    private const val DEFAULT_HUE_MAX = 175.0
+    private const val DEFAULT_SATURATION_MIN = 45.0
+    private const val DEFAULT_VALUE_MIN = 40.0
     private const val HUE_TOLERANCE = 7.5
     private const val SATURATION_TOLERANCE_DOWN = 55.0
     private const val SATURATION_TOLERANCE_UP = 30.0
@@ -42,11 +43,14 @@ object OpenCVUtils {
     private const val MIN_CALIBRATED_SATURATION = 35.0
     private const val MIN_CALIBRATED_VALUE = 30.0
     private const val SAMPLE_WINDOW_RADIUS = 64
-    private const val SAMPLE_SEED_SEARCH_RADIUS = 40
+    private const val SAMPLE_MIN_RADIUS = 6
     private const val SAMPLE_HUE_DIFFERENCE = 10.0
-    private const val SAMPLE_SATURATION_DIFFERENCE = 80.0
-    private const val SAMPLE_VALUE_DIFFERENCE = 100.0
+    private const val SAMPLE_ANGLE_BUCKETS = 36
+    private const val SAMPLE_HUE_BUCKET_TOLERANCE = 4
+    private const val MIN_SAMPLE_ANGLE_COVERAGE = 10
     private const val CALIBRATED_RADIUS_TOLERANCE = 0.50
+    private const val UNBACKED_RADIUS_MIN_FACTOR = 0.68
+    private const val UNBACKED_RADIUS_MAX_FACTOR = 1.35
 
     private val isOpenCvLoaded: Boolean by lazy { OpenCVLoader.initLocal() }
 
@@ -292,9 +296,9 @@ object OpenCVUtils {
      * Detects control centers together with the symbol type needed by routing orchestration.
      *
      * [requireRingHole] is intended for diagnostics and tests. By default, hierarchy-backed
-     * rings are preferred whenever any are found, but strong shape-only circles remain as a
-     * whole-image fallback when photography or morphology has closed every ring hole. This
-     * avoids restoring the original all-points-missed failure mode on degraded photos.
+     * rings establish the expected symbol size. Equally sized circular contours without a
+     * preserved hole are retained because map detail, a course line, or faded print can break a
+     * real ring's contour. Contours with a clearly non-ring child are still rejected as digits.
      */
     fun detectControlSymbols(
         bitmap: Bitmap,
@@ -344,13 +348,22 @@ object OpenCVUtils {
                 val childContour = contours.getOrNull(childIndex)
                 symbolCandidate(contour, childContour, minimumRadius, maximumRadius)
             }
-            val hasHierarchyBackedCircle = allCandidates.any { candidate ->
-                candidate.shape == SymbolShape.CIRCLE && candidate.hasRingHole
-            }
+            val ringRadii = allCandidates
+                .filter { it.shape == SymbolShape.CIRCLE && it.ringEvidence == RingEvidence.MATCH }
+                .map(SymbolCandidate::radius)
+                .sorted()
+            val referenceRadius = ringRadii.takeIf(List<Float>::isNotEmpty)
+                ?.let { radii -> radii[radii.size / 2] }
             val candidates = allCandidates.filter { candidate ->
-                candidate.shape == SymbolShape.TRIANGLE ||
-                    candidate.hasRingHole ||
-                    (!requireRingHole && !hasHierarchyBackedCircle)
+                when {
+                    candidate.shape == SymbolShape.TRIANGLE -> true
+                    candidate.ringEvidence == RingEvidence.MATCH -> true
+                    requireRingHole || candidate.ringEvidence == RingEvidence.MISMATCH -> false
+                    referenceRadius == null -> true
+                    else -> candidate.radius in
+                        (referenceRadius * UNBACKED_RADIUS_MIN_FACTOR)..
+                        (referenceRadius * UNBACKED_RADIUS_MAX_FACTOR)
+                }
             }.sortedByDescending(SymbolCandidate::radius)
 
             val symbolGroups = mutableListOf<MutableList<SymbolCandidate>>()
@@ -444,9 +457,12 @@ object OpenCVUtils {
                 center = Point2D(center.x.toFloat(), center.y.toFloat()),
                 radius = radius[0],
                 shape = if (isCircle) SymbolShape.CIRCLE else SymbolShape.TRIANGLE,
-                hasRingHole = isCircle && childContour?.let { child ->
-                    hasConcentricRingHole(contour, child, radius[0])
-                } == true,
+                ringEvidence = when {
+                    !isCircle -> RingEvidence.NONE
+                    childContour == null -> RingEvidence.NONE
+                    hasConcentricRingHole(contour, childContour, radius[0]) -> RingEvidence.MATCH
+                    else -> RingEvidence.MISMATCH
+                },
             )
         } finally {
             approximation.release()
@@ -455,10 +471,12 @@ object OpenCVUtils {
     }
 
     /**
-     * Samples the symbol ink connected to [tapPoint] and returns tolerant HSV/radius bounds.
+     * Samples the circular ink surrounding [tapPoint] and returns tolerant HSV/radius bounds.
      *
-     * Hue receives the narrowest symmetric margin. Saturation and Value extend farther toward
-     * darker/lower-saturation pixels because shadows affect those channels much more than Hue.
+     * This deliberately does not flood-fill from one seed pixel: real control rings are often
+     * interrupted by map detail, and the most saturated nearby pixel can belong to a contour or
+     * vegetation symbol. Instead, hue/radius candidates are scored by angular coverage around
+     * the tapped center. A line has little angular coverage while a broken ring still has plenty.
      */
     fun sampleControlPointColor(
         bitmap: Bitmap,
@@ -472,7 +490,6 @@ object OpenCVUtils {
         val rgba = Mat()
         val rgb = Mat()
         val hsv = Mat()
-        val points = MatOfPoint2f()
         return try {
             Utils.bitmapToMat(bitmap, rgba)
             Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
@@ -484,80 +501,81 @@ object OpenCVUtils {
             val top = (centerY - SAMPLE_WINDOW_RADIUS).coerceAtLeast(0)
             val right = (centerX + SAMPLE_WINDOW_RADIUS).coerceAtMost(bitmap.width - 1)
             val bottom = (centerY + SAMPLE_WINDOW_RADIUS).coerceAtMost(bitmap.height - 1)
-            val width = right - left + 1
-            val height = bottom - top + 1
-
-            var seedX = -1
-            var seedY = -1
-            var seed: DoubleArray? = null
-            var bestSeedScore = Double.NEGATIVE_INFINITY
-            for (y in (centerY - SAMPLE_SEED_SEARCH_RADIUS).coerceAtLeast(top)..
-                (centerY + SAMPLE_SEED_SEARCH_RADIUS).coerceAtMost(bottom)) {
-                for (x in (centerX - SAMPLE_SEED_SEARCH_RADIUS).coerceAtLeast(left)..
-                    (centerX + SAMPLE_SEED_SEARCH_RADIUS).coerceAtMost(right)) {
+            val maximumRadius = minOf(
+                SAMPLE_WINDOW_RADIUS - 4,
+                minOf(bitmap.width, bitmap.height) / 5,
+            )
+            if (maximumRadius < SAMPLE_MIN_RADIUS) return null
+            val coverage = Array(180) { LongArray(maximumRadius + 1) }
+            for (y in top..bottom) {
+                for (x in left..right) {
                     val pixel = hsv.get(y, x) ?: continue
-                    val score = pixel[1] * (0.5 + pixel[2] / 510.0)
-                    if (pixel[1] >= MIN_CALIBRATED_SATURATION &&
-                        pixel[2] >= MIN_CALIBRATED_VALUE && score > bestSeedScore
-                    ) {
-                        seedX = x
-                        seedY = y
-                        seed = pixel
-                        bestSeedScore = score
+                    if (pixel[1] < MIN_CALIBRATED_SATURATION || pixel[2] < MIN_CALIBRATED_VALUE) {
+                        continue
+                    }
+                    val dx = (x - tapPoint.x).toDouble()
+                    val dy = (y - tapPoint.y).toDouble()
+                    val radius = sqrt(dx * dx + dy * dy).roundToInt()
+                    if (radius !in 1..maximumRadius) continue
+                    val hue = pixel[0].roundToInt().coerceIn(0, 179)
+                    val angle = ((atan2(dy, dx) + PI) / (2.0 * PI) * SAMPLE_ANGLE_BUCKETS)
+                        .toInt().coerceIn(0, SAMPLE_ANGLE_BUCKETS - 1)
+                    coverage[hue][radius] = coverage[hue][radius] or (1L shl angle)
+                }
+            }
+
+            var bestHue = -1
+            var bestRadius = -1
+            var bestCoverage = 0
+            fun combinedAngles(hue: Int, radius: Int, radialTolerance: Int): Long {
+                var angles = 0L
+                for (hueOffset in -SAMPLE_HUE_BUCKET_TOLERANCE..SAMPLE_HUE_BUCKET_TOLERANCE) {
+                    val nearbyHue = (hue + hueOffset + 180) % 180
+                    for (nearbyRadius in (radius - radialTolerance).coerceAtLeast(1)..
+                        (radius + radialTolerance).coerceAtMost(maximumRadius)) {
+                        angles = angles or coverage[nearbyHue][nearbyRadius]
+                    }
+                }
+                return angles
+            }
+            for (hue in 0..179) {
+                for (radius in SAMPLE_MIN_RADIUS..maximumRadius) {
+                    val radialTolerance = (radius * 0.22).roundToInt().coerceIn(3, 8)
+                    val angles = combinedAngles(hue, radius, radialTolerance)
+                    val angleCount = java.lang.Long.bitCount(angles)
+                    val innerRadius = (radius * 0.4).roundToInt().coerceAtLeast(1)
+                    val innerAngles = combinedAngles(hue, innerRadius, 2)
+                    val innerAngleCount = java.lang.Long.bitCount(innerAngles)
+                    // A filled patch or thick line can surround a tiny radius, but a ring has
+                    // substantially less matching ink near its center than on its perimeter.
+                    if (innerAngleCount >= angleCount * 0.7) continue
+                    if (angleCount > bestCoverage) {
+                        bestCoverage = angleCount
+                        bestHue = hue
+                        bestRadius = radius
                     }
                 }
             }
-            val seedColor = seed ?: return null
+            if (bestCoverage < MIN_SAMPLE_ANGLE_COVERAGE) return null
 
-            val visited = BooleanArray(width * height)
-            val queue = ArrayDeque<Int>()
+            val radialTolerance = (bestRadius * 0.22).roundToInt().coerceIn(3, 8)
             val sampled = mutableListOf<SamplePixel>()
-            fun enqueue(x: Int, y: Int) {
-                if (x !in left..right || y !in top..bottom) return
-                val index = (y - top) * width + (x - left)
-                if (!visited[index]) {
-                    visited[index] = true
-                    queue.addLast(index)
+            for (y in top..bottom) {
+                for (x in left..right) {
+                    val pixel = hsv.get(y, x) ?: continue
+                    val dx = (x - tapPoint.x).toDouble()
+                    val dy = (y - tapPoint.y).toDouble()
+                    val radius = sqrt(dx * dx + dy * dy)
+                    val hueDifference = abs(pixel[0] - bestHue).let { minOf(it, 180.0 - it) }
+                    if (hueDifference <= SAMPLE_HUE_DIFFERENCE &&
+                        abs(radius - bestRadius) <= radialTolerance &&
+                        pixel[1] >= MIN_CALIBRATED_SATURATION && pixel[2] >= MIN_CALIBRATED_VALUE
+                    ) {
+                        sampled += SamplePixel(x, y, pixel[0], pixel[1], pixel[2])
+                    }
                 }
             }
-            enqueue(seedX, seedY)
-            while (queue.isNotEmpty()) {
-                val index = queue.removeFirst()
-                val x = left + index % width
-                val y = top + index / width
-                val pixel = hsv.get(y, x) ?: continue
-                val hueDifference = abs(pixel[0] - seedColor[0]).let { minOf(it, 180.0 - it) }
-                if (hueDifference > SAMPLE_HUE_DIFFERENCE ||
-                    abs(pixel[1] - seedColor[1]) > SAMPLE_SATURATION_DIFFERENCE ||
-                    abs(pixel[2] - seedColor[2]) > SAMPLE_VALUE_DIFFERENCE ||
-                    pixel[1] < MIN_CALIBRATED_SATURATION || pixel[2] < MIN_CALIBRATED_VALUE
-                ) {
-                    continue
-                }
-                sampled += SamplePixel(x, y, pixel[0], pixel[1], pixel[2])
-                enqueue(x - 1, y)
-                enqueue(x + 1, y)
-                enqueue(x, y - 1)
-                enqueue(x, y + 1)
-            }
-            if (sampled.size < 20) return null
-
-            points.fromArray(*sampled.map { Point(it.x.toDouble(), it.y.toDouble()) }.toTypedArray())
-            val circleCenter = Point()
-            val radius = FloatArray(1)
-            Imgproc.minEnclosingCircle(points, circleCenter, radius)
-            val minX = sampled.minOf(SamplePixel::x)
-            val maxX = sampled.maxOf(SamplePixel::x)
-            val minY = sampled.minOf(SamplePixel::y)
-            val maxY = sampled.maxOf(SamplePixel::y)
-            val aspectRatio = (maxX - minX + 1).toDouble() / (maxY - minY + 1).coerceAtLeast(1)
-            val fillRatio = sampled.size / (PI * radius[0] * radius[0]).coerceAtLeast(1.0)
-            val tapOffset = Point2D(circleCenter.x.toFloat(), circleCenter.y.toFloat()).distanceTo(tapPoint)
-            if (radius[0] < 4f || radius[0] > SAMPLE_WINDOW_RADIUS * 0.9f ||
-                aspectRatio !in 0.65..1.35 || fillRatio !in 0.08..0.75 || tapOffset > radius[0] * 1.2f
-            ) {
-                return null
-            }
+            if (sampled.size < 12) return null
 
             val hueRange = percentile(sampled.map(SamplePixel::hue), 0.05)..
                 percentile(sampled.map(SamplePixel::hue), 0.95)
@@ -574,10 +592,9 @@ object OpenCVUtils {
                 valueRange = (valueRange.start - VALUE_TOLERANCE_DOWN)
                     .coerceAtLeast(MIN_CALIBRATED_VALUE)..
                     (valueRange.endInclusive + VALUE_TOLERANCE_UP).coerceAtMost(255.0),
-                estimatedRadius = radius[0],
+                estimatedRadius = bestRadius.toFloat(),
             )
         } finally {
-            points.release()
             hsv.release()
             rgb.release()
             rgba.release()
@@ -697,7 +714,7 @@ object OpenCVUtils {
         val center: Point2D,
         val radius: Float,
         val shape: SymbolShape,
-        val hasRingHole: Boolean,
+        val ringEvidence: RingEvidence,
     )
 
     private data class SamplePixel(
@@ -709,6 +726,7 @@ object OpenCVUtils {
     )
 
     private enum class SymbolShape { CIRCLE, TRIANGLE }
+    private enum class RingEvidence { MATCH, MISMATCH, NONE }
 }
 
 data class DetectedControlSymbol(
