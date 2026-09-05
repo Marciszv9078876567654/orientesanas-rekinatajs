@@ -118,7 +118,7 @@ internal fun EditMapScreen(
             )
             ControlColorCalibrationCanvas(
                 bitmap = rectified,
-                controlPoints = processingState.calibrationPreviewPoints.orEmpty(),
+                referencePoints = processingState.calibrationReferencePoints,
                 onPointSelected = onApplyColorCalibrationSample,
                 rotationQuarterTurns = rotation,
                 rotationOffsetDegrees = rotationOffsetDegrees,
@@ -138,7 +138,7 @@ internal fun EditMapScreen(
                 }
                 Button(
                     onClick = onConfirmColorCalibration,
-                    enabled = processingState.calibrationPreviewPoints != null &&
+                    enabled = processingState.pendingColorCalibration != null &&
                         !processingState.isSamplingColor,
                     modifier = Modifier.weight(1f),
                 ) {

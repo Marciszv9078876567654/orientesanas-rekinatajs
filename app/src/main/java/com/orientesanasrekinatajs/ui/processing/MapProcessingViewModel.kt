@@ -51,7 +51,7 @@ data class MapProcessingUiState(
     val isCalibratingColor: Boolean = false,
     val colorCalibration: ColorCalibrationSample? = null,
     val pendingColorCalibration: ColorCalibrationSample? = null,
-    val calibrationPreviewPoints: List<ControlPoint>? = null,
+    val calibrationReferencePoints: List<Point2D> = emptyList(),
     val isSamplingColor: Boolean = false,
     val reviewSummaryDismissed: Boolean = false,
 ) {
@@ -230,7 +230,7 @@ class MapProcessingViewModel internal constructor(
         _uiState.value = _uiState.value.copy(
             isCalibratingColor = true,
             pendingColorCalibration = null,
-            calibrationPreviewPoints = null,
+            calibrationReferencePoints = emptyList(),
             isSamplingColor = false,
             error = null,
         )
@@ -241,28 +241,54 @@ class MapProcessingViewModel internal constructor(
         _uiState.value = _uiState.value.copy(
             isCalibratingColor = false,
             pendingColorCalibration = null,
-            calibrationPreviewPoints = null,
+            calibrationReferencePoints = emptyList(),
             isSamplingColor = false,
             error = null,
         )
     }
 
-    /** Applies the sampled preview as a replacement for the previous automatic/manual points. */
+    /** Detects and applies the replacement point set after reference selection is confirmed. */
     fun confirmColorCalibration() {
         val current = _uiState.value
         val sample = current.pendingColorCalibration ?: return
-        val preview = current.calibrationPreviewPoints ?: return
-        _uiState.value = current.copy(
-            controlPoints = preview,
-            colorCalibration = sample,
-            pendingColorCalibration = null,
-            calibrationPreviewPoints = null,
-            isCalibratingColor = false,
-            isSamplingColor = false,
-            savedContentDirty = true,
-            error = null,
-            reviewSummaryDismissed = preview.none(ControlPoint::needsReview),
-        )
+        val rectified = current.rectifiedBitmap ?: return
+        processingJob?.cancel()
+        processingJob = viewModelScope.launch {
+            _uiState.value = current.copy(isSamplingColor = true, error = null)
+            runCatching {
+                withContext(workerDispatcher) {
+                    val symbols = engine.detectControlSymbols(rectified, sample)
+                    val detected = recognizeControlPoints(rectified, symbols, sample)
+                    if (detected.isEmpty()) {
+                        _uiState.value = current.copy(
+                            isCalibratingColor = true,
+                            isSamplingColor = false,
+                            error = "No matching control circles were found. Try another reference.",
+                        )
+                        return@withContext
+                    }
+                    _uiState.value = current.copy(
+                        controlPoints = detected,
+                        colorCalibration = sample,
+                        pendingColorCalibration = null,
+                        calibrationReferencePoints = emptyList(),
+                        isCalibratingColor = false,
+                        isSamplingColor = false,
+                        savedContentDirty = true,
+                        error = null,
+                        reviewSummaryDismissed = detected.none(ControlPoint::needsReview),
+                    )
+                }
+            }.onFailure { throwable ->
+                if (throwable !is kotlinx.coroutines.CancellationException) {
+                    _uiState.value = current.copy(
+                        isCalibratingColor = true,
+                        isSamplingColor = false,
+                        error = throwable.message ?: "Control color calibration failed",
+                    )
+                }
+            }
+        }
     }
 
     fun dismissError() {
@@ -273,7 +299,7 @@ class MapProcessingViewModel internal constructor(
         _uiState.value = _uiState.value.copy(reviewSummaryDismissed = true)
     }
 
-    /** Samples one known circle and stages a replacement point set for explicit confirmation. */
+    /** Samples one reference circle without running full-map detection or OCR. */
     fun applyColorCalibrationSample(tapPoint: Point2D) {
         val current = _uiState.value
         val rectified = current.rectifiedBitmap ?: return
@@ -291,20 +317,27 @@ class MapProcessingViewModel internal constructor(
                         )
                         return@withContext
                     }
-                    val symbols = engine.detectControlSymbols(rectified, sample)
-                    val detected = recognizeControlPoints(rectified, symbols, sample)
-                    if (detected.isEmpty()) {
-                        _uiState.value = current.copy(
-                            isCalibratingColor = true,
-                            isSamplingColor = false,
-                            error = "Color sampled, but no matching control circles were found. " +
-                                "Try another clear control.",
+                    val existingReferences = current.calibrationReferencePoints
+                    val isDuplicate = existingReferences.any { reference ->
+                        reference.distanceTo(tapPoint) <= sample.estimatedRadius * 0.75f
+                    }
+                    val references = if (isDuplicate) {
+                        existingReferences
+                    } else {
+                        existingReferences + tapPoint
+                    }
+                    val combinedSample = if (isDuplicate) {
+                        current.pendingColorCalibration ?: sample
+                    } else {
+                        combineCalibrationSamples(
+                            current.pendingColorCalibration,
+                            sample,
+                            existingReferences.size,
                         )
-                        return@withContext
                     }
                     _uiState.value = current.copy(
-                        pendingColorCalibration = sample,
-                        calibrationPreviewPoints = detected,
+                        pendingColorCalibration = combinedSample,
+                        calibrationReferencePoints = references,
                         isCalibratingColor = true,
                         isSamplingColor = false,
                         error = null,
@@ -321,6 +354,26 @@ class MapProcessingViewModel internal constructor(
                 }
             }
         }
+    }
+
+    private fun combineCalibrationSamples(
+        existing: ColorCalibrationSample?,
+        added: ColorCalibrationSample,
+        existingCount: Int,
+    ): ColorCalibrationSample {
+        if (existing == null || existingCount == 0) return added
+        val totalCount = existingCount + 1
+        return ColorCalibrationSample(
+            hueRange = minOf(existing.hueRange.start, added.hueRange.start)..
+                maxOf(existing.hueRange.endInclusive, added.hueRange.endInclusive),
+            saturationRange = minOf(existing.saturationRange.start, added.saturationRange.start)..
+                maxOf(existing.saturationRange.endInclusive, added.saturationRange.endInclusive),
+            valueRange = minOf(existing.valueRange.start, added.valueRange.start)..
+                maxOf(existing.valueRange.endInclusive, added.valueRange.endInclusive),
+            estimatedRadius = (
+                existing.estimatedRadius * existingCount + added.estimatedRadius
+                ) / totalCount,
+        )
     }
 
     /** Opens a transferred map as a new unsaved working copy. */

@@ -407,6 +407,7 @@ fun DistanceCalibrationCanvas(
     end: Point2D?,
     onLineChange: (Point2D?, Point2D?) -> Unit,
     controlPoints: List<ControlPoint> = emptyList(),
+    selectionPoints: List<Point2D> = emptyList(),
     rotationQuarterTurns: Int = 0,
     rotationOffsetDegrees: Float = 0f,
     rotationGesturesEnabled: Boolean = true,
@@ -556,6 +557,12 @@ fun DistanceCalibrationCanvas(
             }
         }
         drawReferencePoints(controlPoints, viewport, zoom, useTypeColors = false)
+        val selectionScale = sqrt(zoom).coerceAtMost(2.4f)
+        selectionPoints.forEach { point ->
+            val center = viewport.toCanvas(point)
+            drawCircle(Color.White, radius = 12f * selectionScale, center = center)
+            drawCircle(Color(0xFFFF8F00), radius = 8f * selectionScale, center = center)
+        }
     }
 }
 
@@ -563,7 +570,7 @@ fun DistanceCalibrationCanvas(
 @Composable
 fun ControlColorCalibrationCanvas(
     bitmap: Bitmap,
-    controlPoints: List<ControlPoint> = emptyList(),
+    referencePoints: List<Point2D> = emptyList(),
     onPointSelected: (Point2D) -> Unit,
     rotationQuarterTurns: Int = 0,
     rotationOffsetDegrees: Float = 0f,
@@ -578,7 +585,7 @@ fun ControlColorCalibrationCanvas(
         // resubmit the old location, so the user can never correct an imprecise first tap.
         start = null,
         end = null,
-        controlPoints = controlPoints,
+        selectionPoints = referencePoints,
         onLineChange = { point, _ ->
             point?.let(onPointSelected)
         },

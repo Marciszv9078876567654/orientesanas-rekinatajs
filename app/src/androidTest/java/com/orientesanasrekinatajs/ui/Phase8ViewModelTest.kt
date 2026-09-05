@@ -154,7 +154,7 @@ class Phase8ViewModelTest {
     }
 
     @Test
-    fun mapProcessing_previewsCalibrationThenReplacesExistingPointsOnConfirm() {
+    fun mapProcessing_collectsReferencesThenDetectsAndReplacesOnlyOnConfirm() {
         val sample = ColorCalibrationSample(140.0..160.0, 80.0..255.0, 60.0..255.0, 10f)
         val engine = FakeProcessingEngine(
             calibrationSample = sample,
@@ -165,20 +165,24 @@ class Phase8ViewModelTest {
         val viewModel = MapProcessingViewModel(engine, Dispatchers.Unconfined)
         onMainThread { viewModel.processImage(Uri.parse("content://test/calibration")) }
         val existingIds = viewModel.uiState.value.controlPoints.mapTo(mutableSetOf(), ControlPoint::id)
+        val callsBeforeCalibration = engine.calls.toList()
 
         onMainThread {
             viewModel.startColorCalibration()
             assertTrue(viewModel.uiState.value.isCalibratingColor)
             viewModel.applyColorCalibrationSample(Point2D(75f, 20f))
+            viewModel.applyColorCalibrationSample(Point2D(25f, 75f))
         }
 
         val previewState = viewModel.uiState.value
         assertEquals(MapProcessingStage.COMPLETE, previewState.stage)
         assertTrue(previewState.isCalibratingColor)
         assertEquals(existingIds, previewState.controlPoints.mapTo(mutableSetOf(), ControlPoint::id))
-        assertTrue(previewState.calibrationPreviewPoints?.any {
-            it.center == Point2D(75f, 20f)
-        } == true)
+        assertEquals(
+            listOf(Point2D(75f, 20f), Point2D(25f, 75f)),
+            previewState.calibrationReferencePoints,
+        )
+        assertEquals(callsBeforeCalibration + listOf("sample", "sample"), engine.calls)
 
         onMainThread { viewModel.confirmColorCalibration() }
 

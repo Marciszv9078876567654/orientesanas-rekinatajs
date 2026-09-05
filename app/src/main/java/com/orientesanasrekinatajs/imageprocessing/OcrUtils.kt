@@ -5,6 +5,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlin.math.roundToInt
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -12,6 +13,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /** On-device OCR operations for extracting orienteering control numbers. */
 object OcrUtils {
     private const val MIN_INPUT_DIMENSION = 32
+    private const val TARGET_TEXT_DIMENSION = 160
+    private const val MAX_UPSCALE_FACTOR = 4f
     private val controlNumberPattern = Regex("""\b\d{2,3}\b""")
     private val recognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -25,9 +28,26 @@ object OcrUtils {
      */
     suspend fun extractControlNumber(bitmap: Bitmap): Int? {
         if (bitmap.width < MIN_INPUT_DIMENSION || bitmap.height < MIN_INPUT_DIMENSION) return null
-        val image = InputImage.fromBitmap(bitmap, 0)
-        val recognizedText = recognize(image)
-        return selectClosestCandidate(recognizedText, bitmap.width, bitmap.height)
+        val minimumDimension = minOf(bitmap.width, bitmap.height)
+        val scale = (TARGET_TEXT_DIMENSION.toFloat() / minimumDimension)
+            .coerceIn(1f, MAX_UPSCALE_FACTOR)
+        val prepared = if (scale > 1f) {
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).roundToInt(),
+                (bitmap.height * scale).roundToInt(),
+                true,
+            )
+        } else {
+            bitmap
+        }
+        return try {
+            val image = InputImage.fromBitmap(prepared, 0)
+            val recognizedText = recognize(image)
+            selectClosestCandidate(recognizedText, prepared.width, prepared.height)
+        } finally {
+            if (prepared !== bitmap && !prepared.isRecycled) prepared.recycle()
+        }
     }
 
     internal fun controlNumbersIn(text: String): List<Int> =

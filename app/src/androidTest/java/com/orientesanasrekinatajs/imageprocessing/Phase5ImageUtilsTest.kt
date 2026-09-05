@@ -76,6 +76,13 @@ class Phase5ImageUtilsTest {
     }
 
     @Test
+    fun extractControlNumberUpscalesSmallMapLabel() = runBlocking {
+        val bitmap = textBitmap("83", width = 64, height = 64, textSize = 24f)
+
+        assertEquals(83, OcrUtils.extractControlNumber(bitmap))
+    }
+
+    @Test
     fun extractControlNumberRejectsSingleDigitText() = runBlocking {
         val bitmap = textBitmap("7")
 
@@ -89,18 +96,23 @@ class Phase5ImageUtilsTest {
         assertNull(OcrUtils.extractControlNumber(bitmap))
     }
 
-    private fun textBitmap(value: String): Bitmap {
-        val bitmap = Bitmap.createBitmap(480, 240, Bitmap.Config.ARGB_8888)
+    private fun textBitmap(
+        value: String,
+        width: Int = 480,
+        height: Int = 240,
+        textSize: Float = 160f,
+    ): Bitmap {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             textAlign = Paint.Align.CENTER
-            textSize = 160f
+            this.textSize = textSize
             typeface = Typeface.DEFAULT_BOLD
         }
-        val baseline = bitmap.height / 2f - (paint.ascent() + paint.descent()) / 2f
-        canvas.drawText(value, bitmap.width / 2f, baseline, paint)
+        val baseline = height / 2f - (paint.ascent() + paint.descent()) / 2f
+        canvas.drawText(value, width / 2f, baseline, paint)
         return bitmap
     }
 }
