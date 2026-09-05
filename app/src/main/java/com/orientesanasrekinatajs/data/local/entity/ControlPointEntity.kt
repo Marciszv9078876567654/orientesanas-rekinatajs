@@ -1,6 +1,7 @@
 package com.orientesanasrekinatajs.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -22,6 +23,7 @@ import androidx.room.PrimaryKey
  * @property x        Horizontal center coordinate in the rectified map's pixel space.
  * @property y        Vertical center coordinate in the rectified map's pixel space.
  * @property type     `ControlPointType.name` of the symbol.
+ * @property needsReview Whether the recognized code needs user confirmation.
  */
 @Entity(
     tableName = "control_points",
@@ -43,4 +45,5 @@ data class ControlPointEntity(
     val x: Float,
     val y: Float,
     val type: String,
+    @ColumnInfo(defaultValue = "0") val needsReview: Boolean = false,
 )

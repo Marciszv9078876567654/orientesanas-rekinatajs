@@ -46,7 +46,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +84,7 @@ internal fun EditMapScreen(
     onApplyColorCalibrationSample: (Point2D) -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
+    onDismissReviewSummary: () -> Unit,
     onOpenRoute: () -> Unit,
     isSaving: Boolean,
     isDirty: Boolean,
@@ -172,6 +175,7 @@ internal fun EditMapScreen(
         processingState.savedPixelsPerMeter
     }
     val visiblePoints = editedPoints ?: processingState.controlPoints
+    val reviewPointCount = processingState.controlPoints.count(ControlPoint::needsReview)
     val pointChangesPending = pointEditBaseline?.let { original -> visiblePoints != original } == true
     val cornerChangesPending = cornerEditBaseline?.let { original -> editedBoundary != original } == true
     val discardCornerChanges: () -> Unit = {
@@ -481,7 +485,7 @@ internal fun EditMapScreen(
         }
     }
 
-    if (showHelp) {
+    if (showHelp && (reviewPointCount == 0 || processingState.reviewSummaryDismissed)) {
         MessageDialog(
             title = stringResource(R.string.usage_tip_title),
             message = stringResource(
@@ -495,6 +499,18 @@ internal fun EditMapScreen(
                 showHelp = false
                 onUsageTipDismissed()
             },
+        )
+    }
+
+    if (reviewPointCount > 0 && !processingState.reviewSummaryDismissed) {
+        MessageDialog(
+            title = stringResource(R.string.points_need_review_title),
+            message = pluralStringResource(
+                R.plurals.points_need_review,
+                reviewPointCount,
+                reviewPointCount,
+            ),
+            onDismiss = onDismissReviewSummary,
         )
     }
 
@@ -627,7 +643,7 @@ internal fun MapOverlayButtons(
 }
 
 @Composable
-private fun ControlPointEditorDialog(
+internal fun ControlPointEditorDialog(
     point: ControlPoint,
     isNew: Boolean,
     onSave: (ControlPoint) -> Unit,
@@ -636,7 +652,7 @@ private fun ControlPointEditorDialog(
 ) {
     val focusManager = LocalFocusManager.current
     var codeText by rememberSaveable(point.id) {
-        mutableStateOf(if (isNew) "" else point.code.toString())
+        mutableStateOf(if (isNew || point.needsReview) "" else point.code.toString())
     }
     var type by rememberSaveable(point.id) { mutableStateOf(point.type) }
     AlertDialog(
@@ -656,7 +672,7 @@ private fun ControlPointEditorDialog(
                         label = { Text(stringResource(R.string.control_code)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag("controlPointCode"),
                     )
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -689,9 +705,18 @@ private fun ControlPointEditorDialog(
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
                 TextButton(
+                    enabled = type != ControlPointType.CONTROL ||
+                        (codeText.toIntOrNull()?.let { it >= 31 } == true),
                     onClick = {
                         val code = if (type == ControlPointType.CONTROL) codeText.toIntOrNull() ?: 0 else 0
-                        onSave(point.copy(code = code, points = if (type == ControlPointType.CONTROL) code / 10 else 0, type = type))
+                        onSave(
+                            point.copy(
+                                code = code,
+                                points = if (type == ControlPointType.CONTROL) code / 10 else 0,
+                                type = type,
+                                needsReview = false,
+                            ),
+                        )
                     },
                 ) { Text(stringResource(R.string.save)) }
             }

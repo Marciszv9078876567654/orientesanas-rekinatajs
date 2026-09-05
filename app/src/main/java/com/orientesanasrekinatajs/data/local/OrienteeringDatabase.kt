@@ -15,7 +15,7 @@ import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
  */
 @Database(
     entities = [ScannedMapEntity::class, ControlPointEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class OrienteeringDatabase : RoomDatabase() {
@@ -37,7 +37,7 @@ abstract class OrienteeringDatabase : RoomDatabase() {
                     DATABASE_NAME,
                 ).addMigrations(
                     MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                    MIGRATION_5_6, MIGRATION_6_7,
+                    MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
                 )
                     .build().also { instance = it }
             }
@@ -99,6 +99,15 @@ abstract class OrienteeringDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE scanned_maps ADD COLUMN routeIds TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE scanned_maps ADD COLUMN selectedRouteId TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE control_points ADD COLUMN needsReview " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
             }
         }
     }

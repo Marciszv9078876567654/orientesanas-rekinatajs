@@ -243,4 +243,9 @@
     <string name="calibrate_control_color">Calibrate from a known control</string>
     <string name="calibrate_control_color_help">Tap a known control circle. Its color and size will be used to detect the points again.</string>
     <string name="calibrate_control_color_failed">Calibration failed</string>
+    <string name="points_need_review_title">Control points need review</string>
+    <plurals name="points_need_review">
+        <item quantity="one">%1$d control point needs review. It is marked with a question mark on the map.</item>
+        <item quantity="other">%1$d control points need review. They are marked with question marks on the map.</item>
+    </plurals>
 </resources>

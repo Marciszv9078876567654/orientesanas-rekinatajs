@@ -14,6 +14,7 @@ import java.util.UUID
  * @property points   The score value, derived as integer division `code / 10`.
  * @property center   The center of the symbol in the rectified map's pixel space.
  * @property type     The legend type of the symbol.
+ * @property needsReview Whether automatic recognition needs user confirmation.
  */
 data class ControlPoint(
     val id: String = UUID.randomUUID().toString(),
@@ -21,4 +22,5 @@ data class ControlPoint(
     var points: Int = code / 10,
     var center: Point2D,
     var type: ControlPointType = ControlPointType.CONTROL,
+    var needsReview: Boolean = false,
 )

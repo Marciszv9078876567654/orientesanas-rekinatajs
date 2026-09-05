@@ -75,7 +75,49 @@ class Phase8ViewModelTest {
         assertEquals(MapProcessingStage.COMPLETE, state.stage)
         assertEquals(null, state.error)
         assertTrue(!state.manualBoundaryRequired)
-        assertEquals(0, state.controlPoints.single { it.type == ControlPointType.CONTROL }.code)
+        val control = state.controlPoints.single { it.type == ControlPointType.CONTROL }
+        assertEquals(0, control.code)
+        assertTrue(control.needsReview)
+    }
+
+    @Test
+    fun mapProcessing_flagsMissingAndDuplicateRecognizedCodes() {
+        val symbols = listOf(
+            DetectedControlSymbol(Point2D(20f, 20f), 5f, ControlPointType.CONTROL),
+            DetectedControlSymbol(Point2D(50f, 50f), 5f, ControlPointType.CONTROL),
+            DetectedControlSymbol(Point2D(80f, 80f), 5f, ControlPointType.CONTROL),
+        )
+        val viewModel = MapProcessingViewModel(
+            FakeProcessingEngine(symbolsResult = symbols, ocrResults = listOf(null, 65, 65)),
+            Dispatchers.Unconfined,
+        )
+
+        onMainThread { viewModel.processImage(Uri.parse("content://test/review-codes")) }
+
+        val points = viewModel.uiState.value.controlPoints
+        assertEquals(listOf(0, 65, 65), points.map(ControlPoint::code))
+        assertTrue(points.all(ControlPoint::needsReview))
+    }
+
+    @Test
+    fun mapProcessing_manualAddAndEditClearReviewFlag() {
+        val viewModel = MapProcessingViewModel(
+            FakeProcessingEngine(ocrResults = listOf(null)),
+            Dispatchers.Unconfined,
+        )
+        onMainThread { viewModel.processImage(Uri.parse("content://test/manual-review")) }
+        val flagged = viewModel.uiState.value.controlPoints.single { it.type == ControlPointType.CONTROL }
+
+        onMainThread {
+            viewModel.updateControlPoint(flagged.copy(code = 72, points = 7))
+            viewModel.addControlPoint(
+                ControlPoint(code = 83, center = Point2D(70f, 70f), needsReview = true),
+            )
+        }
+
+        val points = viewModel.uiState.value.controlPoints
+        assertTrue(!points.single { it.id == flagged.id }.needsReview)
+        assertTrue(!points.single { it.code == 83 }.needsReview)
     }
 
     @Test
@@ -384,9 +426,12 @@ class Phase8ViewModelTest {
         private val symbolFailure: Throwable? = null,
         private val calibrationSample: ColorCalibrationSample? = null,
         private val calibratedSymbols: List<DetectedControlSymbol> = emptyList(),
+        private val symbolsResult: List<DetectedControlSymbol>? = null,
+        private val ocrResults: List<Int?> = listOf(65),
     ) : MapProcessingEngine {
         val calls = mutableListOf<String>()
         private val bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+        private var ocrIndex = 0
 
         override fun decode(uri: Uri): Bitmap = bitmap.also { calls += "decode" }
 
@@ -399,7 +444,7 @@ class Phase8ViewModelTest {
         override fun detectControlSymbols(bitmap: Bitmap): List<DetectedControlSymbol> {
             calls += "symbols"
             symbolFailure?.let { throw it }
-            return listOf(
+            return symbolsResult ?: listOf(
                 DetectedControlSymbol(Point2D(10f, 10f), 5f, ControlPointType.START),
                 DetectedControlSymbol(Point2D(50f, 50f), 5f, ControlPointType.CONTROL),
                 DetectedControlSymbol(Point2D(90f, 90f), 5f, ControlPointType.FINISH),
@@ -412,7 +457,7 @@ class Phase8ViewModelTest {
         override suspend fun extractControlNumber(bitmap: Bitmap): Int? {
             calls += "ocr"
             ocrFailure?.let { throw it }
-            return 65
+            return ocrResults.getOrElse(ocrIndex++) { ocrResults.lastOrNull() }
         }
 
         override fun detectControlSymbols(

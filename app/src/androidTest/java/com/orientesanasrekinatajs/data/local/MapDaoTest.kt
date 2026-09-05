@@ -84,7 +84,7 @@ class MapDaoTest {
     fun repositorySavesAndReopensBitmapScaleAndPoints() = runBlocking {
         val repository = SavedMapRepository(mapsDirectory, database.mapDao())
         val bitmap = Bitmap.createBitmap(24, 16, Bitmap.Config.ARGB_8888)
-        val point = ControlPoint(code = 65, center = Point2D(8f, 9f))
+        val point = ControlPoint(code = 65, center = Point2D(8f, 9f), needsReview = true)
         val start = ControlPoint(
             code = 0,
             center = Point2D(1f, 1f),
@@ -138,6 +138,7 @@ class MapDaoTest {
         assertEquals(2.5f, reopened.pixelsPerMeter)
         assertEquals(point.code, reopened.points.single { it.type == ControlPointType.CONTROL }.code)
         assertEquals(point.center, reopened.points.single { it.type == ControlPointType.CONTROL }.center)
+        assertTrue(reopened.points.single { it.type == ControlPointType.CONTROL }.needsReview)
         assertEquals("Training route", reopened.name)
         assertEquals(Point2D(1f, 2f), reopened.lineStart)
         assertEquals(Point2D(11f, 2f), reopened.lineEnd)
@@ -194,7 +195,7 @@ class MapDaoTest {
     }
 
     @Test
-    fun migrationOneToThreePreservesExistingMapAndAddsRouteMetadata() = runBlocking {
+    fun migrationOneToEightPreservesExistingDataAndDefaultsReviewFlag() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "migration-${System.nanoTime()}.db"
         context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { legacy ->
@@ -209,6 +210,10 @@ class MapDaoTest {
             )
             legacy.execSQL("CREATE INDEX index_control_points_mapId ON control_points(mapId)")
             legacy.execSQL("INSERT INTO scanned_maps VALUES ('old', 1, '/old.png', 2.0)")
+            legacy.execSQL(
+                "INSERT INTO control_points VALUES " +
+                    "('point', 'old', 65, 6, 10.0, 20.0, 'CONTROL')",
+            )
             legacy.version = 1
         }
         val migrated = Room.databaseBuilder(context, OrienteeringDatabase::class.java, databaseName)
@@ -218,6 +223,8 @@ class MapDaoTest {
                 OrienteeringDatabase.MIGRATION_3_4,
                 OrienteeringDatabase.MIGRATION_4_5,
                 OrienteeringDatabase.MIGRATION_5_6,
+                OrienteeringDatabase.MIGRATION_6_7,
+                OrienteeringDatabase.MIGRATION_7_8,
             )
             .allowMainThreadQueries()
             .build()
@@ -228,6 +235,7 @@ class MapDaoTest {
             assertEquals("SHORTEST", migrated.mapDao().getMap("old")?.routeMode)
             assertEquals("", migrated.mapDao().getMap("old")?.alternativeRoutePointIds)
             assertEquals("{}", migrated.mapDao().getMap("old")?.routeMetadataJson)
+            assertTrue(!migrated.mapDao().observePoints("old").first().single().needsReview)
         } finally {
             migrated.close()
             context.deleteDatabase(databaseName)

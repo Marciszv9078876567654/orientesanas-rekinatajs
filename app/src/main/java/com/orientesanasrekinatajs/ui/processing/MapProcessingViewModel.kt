@@ -50,6 +50,7 @@ data class MapProcessingUiState(
     val manualBoundaryRequired: Boolean = false,
     val isCalibratingColor: Boolean = false,
     val colorCalibration: ColorCalibrationSample? = null,
+    val reviewSummaryDismissed: Boolean = false,
 ) {
     val isProcessing: Boolean
         get() = stage !in setOf(MapProcessingStage.IDLE, MapProcessingStage.COMPLETE)
@@ -170,7 +171,7 @@ class MapProcessingViewModel internal constructor(
         val current = _uiState.value
         _uiState.value = current.copy(
             controlPoints = current.controlPoints.map { point ->
-                if (point.id == updated.id) updated else point
+                if (point.id == updated.id) updated.copy(needsReview = false) else point
             },
             savedContentDirty = true,
         )
@@ -178,7 +179,7 @@ class MapProcessingViewModel internal constructor(
 
     fun addControlPoint(point: ControlPoint) {
         _uiState.value = _uiState.value.copy(
-            controlPoints = _uiState.value.controlPoints + point,
+            controlPoints = _uiState.value.controlPoints + point.copy(needsReview = false),
             savedContentDirty = true,
         )
     }
@@ -234,6 +235,10 @@ class MapProcessingViewModel internal constructor(
         _uiState.value = _uiState.value.copy(error = null)
     }
 
+    fun dismissReviewSummary() {
+        _uiState.value = _uiState.value.copy(reviewSummaryDismissed = true)
+    }
+
     /** Samples one known circle and adds newly detected points without replacing user edits. */
     fun applyColorCalibrationSample(tapPoint: Point2D) {
         val current = _uiState.value
@@ -272,6 +277,7 @@ class MapProcessingViewModel internal constructor(
                         savedContentDirty = current.savedContentDirty || merged != current.controlPoints,
                         stage = MapProcessingStage.COMPLETE,
                         error = null,
+                        reviewSummaryDismissed = merged.none(ControlPoint::needsReview),
                     )
                 }
             }.onFailure { throwable ->
@@ -364,14 +370,19 @@ class MapProcessingViewModel internal constructor(
         rectified: Bitmap,
         symbols: List<DetectedControlSymbol>,
         colorCalibration: ColorCalibrationSample?,
-    ): List<ControlPoint> = symbols.map { symbol ->
+    ): List<ControlPoint> {
+        val points = symbols.map { symbol ->
+            var needsReview = false
             val code = if (symbol.type == ControlPointType.CONTROL) {
                 try {
                     val roi = engine.cropRegion(rectified, symbol)
                     try {
                         val isolated = engine.isolateInkColor(roi, colorCalibration)
                         try {
-                            engine.extractControlNumber(isolated) ?: 0
+                            engine.extractControlNumber(isolated) ?: run {
+                                needsReview = true
+                                0
+                            }
                         } finally {
                             if (isolated !== roi && isolated !== rectified && !isolated.isRecycled) {
                                 isolated.recycle()
@@ -385,6 +396,7 @@ class MapProcessingViewModel internal constructor(
                 } catch (_: Throwable) {
                     // OCR availability varies by device. Keep the detected point editable when
                     // ML Kit cannot initialize or recognize this individual crop.
+                    needsReview = true
                     0
                 }
             } else {
@@ -395,8 +407,22 @@ class MapProcessingViewModel internal constructor(
                 points = if (symbol.type == ControlPointType.CONTROL) code / 10 else 0,
                 center = symbol.center,
                 type = symbol.type,
+                needsReview = needsReview,
             )
         }
+        val duplicateCodes = points.asSequence()
+            .filter { it.type == ControlPointType.CONTROL && it.code != 0 }
+            .groupBy(ControlPoint::code)
+            .filterValues { matches -> matches.size > 1 }
+            .keys
+        return points.map { point ->
+            if (point.type == ControlPointType.CONTROL && point.code in duplicateCodes) {
+                point.copy(needsReview = true)
+            } else {
+                point
+            }
+        }
+    }
 
     private fun updateStage(
         stage: MapProcessingStage,

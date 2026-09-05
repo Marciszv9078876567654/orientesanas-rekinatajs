@@ -72,6 +72,7 @@ internal fun MapFlowScreen(
     onApplyColorCalibrationSample: (Point2D) -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
+    onDismissReviewSummary: () -> Unit,
     onInvalidateRoute: () -> Unit,
     onCalculateRoute: (Float, RouteMode, Float?, Int?) -> Unit,
     onGenerateAlternativeRoutes: (List<ControlPoint>, Float, AlternativeRouteCriteria) -> Unit,
@@ -385,6 +386,7 @@ internal fun MapFlowScreen(
             onApplyColorCalibrationSample = onApplyColorCalibrationSample,
             onCancelColorCalibration = onCancelColorCalibration,
             onDismissProcessingError = onDismissProcessingError,
+            onDismissReviewSummary = onDismissReviewSummary,
             onOpenRoute = {
                 val needsGeneration = routingState.route == null || mapEditChangedSinceEntry
                 if (needsGeneration) routeEntryKey++

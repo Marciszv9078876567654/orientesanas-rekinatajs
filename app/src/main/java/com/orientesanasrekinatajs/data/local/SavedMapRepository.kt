@@ -92,6 +92,7 @@ class SavedMapRepository(
                 x = point.center.x,
                 y = point.center.y,
                 type = point.type.name,
+                needsReview = point.needsReview,
             )
         }
         val persistedIds = persistedPoints.associate { (domain, entity) -> domain.id to entity.id }
@@ -186,6 +187,7 @@ class SavedMapRepository(
                 points = point.points,
                 center = Point2D(point.x, point.y),
                 type = ControlPointType.valueOf(point.type),
+                needsReview = point.needsReview,
             )
         }
         val points = domainById.values.toList()

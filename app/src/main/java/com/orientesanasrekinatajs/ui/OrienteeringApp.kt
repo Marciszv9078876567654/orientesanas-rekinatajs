@@ -89,6 +89,7 @@ fun OrienteeringApp(
     onApplyColorCalibrationSample: (Point2D) -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
+    onDismissReviewSummary: () -> Unit,
     onInvalidateRoute: () -> Unit,
     onCalculateRoute: (
         pixelsPerMeter: Float,
@@ -226,6 +227,7 @@ fun OrienteeringApp(
                     onApplyColorCalibrationSample = onApplyColorCalibrationSample,
                     onCancelColorCalibration = onCancelColorCalibration,
                     onDismissProcessingError = onDismissProcessingError,
+                    onDismissReviewSummary = onDismissReviewSummary,
                     onInvalidateRoute = onInvalidateRoute,
                     onCalculateRoute = onCalculateRoute,
                     onGenerateAlternativeRoutes = onGenerateAlternativeRoutes,

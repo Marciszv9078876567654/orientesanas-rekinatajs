@@ -29,7 +29,9 @@ class MapTransferRepositoryTest {
         val repository = MapTransferRepository.create(context)
         val target = File(context.cacheDir, "transfer-${System.nanoTime()}.ormap")
         val start = ControlPoint("start", 0, 0, Point2D(1f, 1f), ControlPointType.START)
-        val control = ControlPoint("control", 65, 6, Point2D(8f, 5f), ControlPointType.CONTROL)
+        val control = ControlPoint(
+            "control", 65, 6, Point2D(8f, 5f), ControlPointType.CONTROL, needsReview = true,
+        )
         val finish = ControlPoint("finish", 0, 0, Point2D(15f, 9f), ControlPointType.FINISH)
         val route = OptimizedRoute(listOf(start, control, finish), 12f, 6, emptyList(), "route")
         val draft = SavedMapDraft(
@@ -63,6 +65,7 @@ class MapTransferRepositoryTest {
             assertEquals(3, imported.routeMetadata.getValue("route").colorIndex)
             assertTrue(imported.routeRestrictions.single().isStarred)
             assertEquals(control.id, imported.routeRestrictions.single().firstPointId)
+            assertTrue(imported.points.single { it.id == control.id }.needsReview)
             assertEquals(1, imported.rotationQuarterTurns)
         } finally {
             target.delete()

@@ -465,11 +465,14 @@ class MapTransferRepository(
     private fun ControlPoint.toJson() = JSONObject()
         .put("id", id).put("code", code).put("points", points)
         .put("x", center.x).put("y", center.y).put("type", type.name)
+        .put("needsReview", needsReview)
 
     private fun JSONObject.toPoint() = ControlPoint(
         id = getString("id"), code = getInt("code"), points = getInt("points"),
         center = Point2D(getDouble("x").toFloat(), getDouble("y").toFloat()),
         type = ControlPointType.valueOf(getString("type")),
+        // Optional keeps imports from the existing manifest version backward compatible.
+        needsReview = optBoolean("needsReview", false),
     )
 
     private fun RouteMetadata.toJson() = JSONObject()

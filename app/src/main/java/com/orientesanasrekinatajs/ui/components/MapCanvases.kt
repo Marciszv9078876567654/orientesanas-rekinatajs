@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
@@ -884,11 +885,22 @@ private fun DrawScope.drawReferencePoints(
             radius = 9f * pointScale,
             center = center,
         )
+        if (point.needsReview) {
+            drawCircle(
+                color = Color(0xFFFFA000).copy(alpha = visibilityAlpha),
+                radius = 13f * pointScale,
+                center = center,
+                style = Stroke(
+                    width = 3f * pointScale,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 4f)),
+                ),
+            )
+        }
         val label = when (point.type) {
             ControlPointType.START -> "S"
             ControlPointType.FINISH -> "F"
             ControlPointType.START_FINISH -> "S/F"
-            ControlPointType.CONTROL -> point.code.toString()
+            ControlPointType.CONTROL -> if (point.needsReview) "?" else point.code.toString()
         }
         val labelX = center.x + 13f * pointScale
         val labelY = center.y - 10f * pointScale
