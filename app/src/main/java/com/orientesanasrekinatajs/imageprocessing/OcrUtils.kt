@@ -42,9 +42,15 @@ object OcrUtils {
             bitmap
         }
         return try {
-            val image = InputImage.fromBitmap(prepared, 0)
-            val recognizedText = recognize(image)
-            selectClosestCandidate(recognizedText, prepared.width, prepared.height)
+            // Printed labels may be sideways or upside down relative to the source bitmap.
+            // Keep the common upright path fast, then retry the remaining right-angle rotations
+            // only when it contains no plausible control number.
+            listOf(0, 180, 90, 270).firstNotNullOfOrNull { rotation ->
+                val recognizedText = recognize(InputImage.fromBitmap(prepared, rotation))
+                val width = if (rotation % 180 == 0) prepared.width else prepared.height
+                val height = if (rotation % 180 == 0) prepared.height else prepared.width
+                selectClosestCandidate(recognizedText, width, height)
+            }
         } finally {
             if (prepared !== bitmap && !prepared.isRecycled) prepared.recycle()
         }

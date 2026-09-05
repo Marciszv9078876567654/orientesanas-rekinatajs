@@ -46,11 +46,12 @@ object OpenCVUtils {
     private const val MIN_CALIBRATED_VALUE = 30.0
     private const val SAMPLE_WINDOW_RADIUS = 64
     private const val SAMPLE_MIN_RADIUS = 6
+    private const val SAMPLE_HUE_MIN = 115
+    private const val SAMPLE_HUE_MAX = 179
     private const val SAMPLE_HUE_DIFFERENCE = 10.0
     private const val SAMPLE_ANGLE_BUCKETS = 36
     private const val SAMPLE_HUE_BUCKET_TOLERANCE = 4
     private const val MIN_SAMPLE_ANGLE_COVERAGE = 10
-    private const val CALIBRATED_RADIUS_TOLERANCE = 0.50
     private const val UNBACKED_RADIUS_MIN_FACTOR = 0.68
     private const val UNBACKED_RADIUS_MAX_FACTOR = 1.35
     private const val HOUGH_RADIUS_MIN_FACTOR = 0.82
@@ -348,12 +349,10 @@ object OpenCVUtils {
             )
 
             val minimumDimension = minOf(bitmap.width, bitmap.height).toDouble()
-            val minimumRadius = colorCalibration?.estimatedRadius?.let { radius ->
-                max(4.0, radius * (1.0 - CALIBRATED_RADIUS_TOLERANCE))
-            } ?: max(4.0, minimumDimension * 0.004)
-            val maximumRadius = colorCalibration?.estimatedRadius?.let { radius ->
-                minOf(minimumDimension * 0.20, radius * (1.0 + CALIBRATED_RADIUS_TOLERANCE))
-            } ?: (minimumDimension * 0.20)
+            // Calibration primarily identifies ink color. A broken ring or an off-center tap can
+            // distort its sampled radius, so never use that estimate to reject contour sizes.
+            val minimumRadius = max(4.0, minimumDimension * 0.004)
+            val maximumRadius = minimumDimension * 0.20
             val allCandidates = contours.mapIndexedNotNull { index, contour ->
                 val childIndex = hierarchyEntry(hierarchy, index)?.getOrNull(2)?.toInt() ?: -1
                 val childContour = contours.getOrNull(childIndex)
@@ -363,9 +362,9 @@ object OpenCVUtils {
                 .filter { it.shape == SymbolShape.CIRCLE && it.ringEvidence == RingEvidence.MATCH }
                 .map(SymbolCandidate::radius)
                 .sorted()
-            val referenceRadius = colorCalibration?.estimatedRadius
-                ?: ringRadii.takeIf(List<Float>::isNotEmpty)
-                    ?.let { radii -> radii[radii.size / 2] }
+            val referenceRadius = ringRadii.takeIf(List<Float>::isNotEmpty)
+                ?.let { radii -> radii[radii.size / 2] }
+                ?: colorCalibration?.estimatedRadius
             val recoveredCircles = referenceRadius?.let { expectedRadius ->
                 Imgproc.GaussianBlur(mask, blurredMask, Size(5.0, 5.0), 1.4)
                 val houghMinimumRadius = max(
@@ -651,7 +650,7 @@ object OpenCVUtils {
                 }
                 return angles
             }
-            for (hue in 0..179) {
+            for (hue in SAMPLE_HUE_MIN..SAMPLE_HUE_MAX) {
                 for (radius in SAMPLE_MIN_RADIUS..maximumRadius) {
                     val radialTolerance = (radius * 0.22).roundToInt().coerceIn(3, 8)
                     val angles = combinedAngles(hue, radius, radialTolerance)
@@ -662,12 +661,7 @@ object OpenCVUtils {
                     // A filled patch or thick line can surround a tiny radius, but a ring has
                     // substantially less matching ink near its center than on its perimeter.
                     if (innerAngleCount >= angleCount * 0.7) continue
-                    // Several nearby radii can cover the same thick printed stroke. On ties,
-                    // prefer the outer one so the resulting radius describes the full symbol
-                    // rather than its inner edge.
-                    if (angleCount > bestCoverage ||
-                        (angleCount == bestCoverage && angleCount > 0 && radius > bestRadius)
-                    ) {
+                    if (angleCount > bestCoverage) {
                         bestCoverage = angleCount
                         bestHue = hue
                         bestRadius = radius
@@ -675,6 +669,31 @@ object OpenCVUtils {
                 }
             }
             if (bestCoverage < MIN_SAMPLE_ANGLE_COVERAGE) return null
+
+            // Broad radial tolerance finds faded/broken rings, but can make many radii tie. Refine
+            // with a narrow annulus and take the middle of the strongest contiguous band; this
+            // avoids calibrating to an oversized radius when only part of a ring is enclosed.
+            val exactScores = (SAMPLE_MIN_RADIUS..maximumRadius).map { radius ->
+                radius to java.lang.Long.bitCount(combinedAngles(bestHue, radius, 1))
+            }
+            val maximumExactCoverage = exactScores.maxOf(Pair<Int, Int>::second)
+            val strongRadii = exactScores
+                .filter { (_, score) -> score >= maxOf(MIN_SAMPLE_ANGLE_COVERAGE, maximumExactCoverage - 2) }
+                .map(Pair<Int, Int>::first)
+            if (strongRadii.isEmpty()) return null
+            val radiusBands = mutableListOf<MutableList<Int>>()
+            strongRadii.forEach { radius ->
+                val band = radiusBands.lastOrNull()
+                if (band == null || radius > band.last() + 1) {
+                    radiusBands += mutableListOf(radius)
+                } else {
+                    band += radius
+                }
+            }
+            val strongestBand = radiusBands.maxBy { band ->
+                band.sumOf { radius -> exactScores[radius - SAMPLE_MIN_RADIUS].second }
+            }
+            bestRadius = strongestBand[strongestBand.size / 2]
 
             val radialTolerance = (bestRadius * 0.22).roundToInt().coerceIn(3, 8)
             val sampled = mutableListOf<SamplePixel>()

@@ -22,6 +22,7 @@ import com.orientesanasrekinatajs.imageprocessing.OpenCVUtils
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +53,7 @@ data class MapProcessingUiState(
     val colorCalibration: ColorCalibrationSample? = null,
     val pendingColorCalibration: ColorCalibrationSample? = null,
     val calibrationReferencePoints: List<Point2D> = emptyList(),
+    val calibrationReferenceSamples: List<ColorCalibrationSample> = emptyList(),
     val isSamplingColor: Boolean = false,
     val reviewSummaryDismissed: Boolean = false,
 ) {
@@ -231,6 +233,7 @@ class MapProcessingViewModel internal constructor(
             isCalibratingColor = true,
             pendingColorCalibration = null,
             calibrationReferencePoints = emptyList(),
+            calibrationReferenceSamples = emptyList(),
             isSamplingColor = false,
             error = null,
         )
@@ -242,6 +245,7 @@ class MapProcessingViewModel internal constructor(
             isCalibratingColor = false,
             pendingColorCalibration = null,
             calibrationReferencePoints = emptyList(),
+            calibrationReferenceSamples = emptyList(),
             isSamplingColor = false,
             error = null,
         )
@@ -272,6 +276,7 @@ class MapProcessingViewModel internal constructor(
                         colorCalibration = sample,
                         pendingColorCalibration = null,
                         calibrationReferencePoints = emptyList(),
+                        calibrationReferenceSamples = emptyList(),
                         isCalibratingColor = false,
                         isSamplingColor = false,
                         savedContentDirty = true,
@@ -326,18 +331,15 @@ class MapProcessingViewModel internal constructor(
                     } else {
                         existingReferences + tapPoint
                     }
-                    val combinedSample = if (isDuplicate) {
-                        current.pendingColorCalibration ?: sample
+                    val samples = if (isDuplicate) {
+                        current.calibrationReferenceSamples
                     } else {
-                        combineCalibrationSamples(
-                            current.pendingColorCalibration,
-                            sample,
-                            existingReferences.size,
-                        )
+                        current.calibrationReferenceSamples + sample
                     }
                     _uiState.value = current.copy(
-                        pendingColorCalibration = combinedSample,
+                        pendingColorCalibration = combineCalibrationSamples(samples),
                         calibrationReferencePoints = references,
+                        calibrationReferenceSamples = samples,
                         isCalibratingColor = true,
                         isSamplingColor = false,
                         error = null,
@@ -356,23 +358,92 @@ class MapProcessingViewModel internal constructor(
         }
     }
 
+    /** Moves a selected reference immediately and re-samples after drag events settle. */
+    fun moveColorCalibrationReference(index: Int, center: Point2D) {
+        val current = _uiState.value
+        if (index !in current.calibrationReferencePoints.indices) return
+        val movedReferences = current.calibrationReferencePoints.toMutableList().apply {
+            this[index] = center
+        }
+        _uiState.value = current.copy(
+            calibrationReferencePoints = movedReferences,
+            isSamplingColor = true,
+            error = null,
+        )
+        val rectified = current.rectifiedBitmap ?: return
+        processingJob?.cancel()
+        processingJob = viewModelScope.launch {
+            delay(180)
+            runCatching {
+                withContext(workerDispatcher) {
+                    val sample = engine.sampleControlPointColor(rectified, center) ?: run {
+                        val latest = _uiState.value
+                        val references = latest.calibrationReferencePoints
+                            .filterIndexed { sampleIndex, _ -> sampleIndex != index }
+                        val samples = latest.calibrationReferenceSamples
+                            .filterIndexed { sampleIndex, _ -> sampleIndex != index }
+                        _uiState.value = latest.copy(
+                            pendingColorCalibration = combineCalibrationSamples(samples),
+                            calibrationReferencePoints = references,
+                            calibrationReferenceSamples = samples,
+                            isSamplingColor = false,
+                            error = "Couldn't identify a control symbol there. Move it closer to the circle center.",
+                        )
+                        return@withContext
+                    }
+                    val latest = _uiState.value
+                    if (index !in latest.calibrationReferenceSamples.indices) return@withContext
+                    val samples = latest.calibrationReferenceSamples.toMutableList().apply {
+                        this[index] = sample
+                    }
+                    _uiState.value = latest.copy(
+                        pendingColorCalibration = combineCalibrationSamples(samples),
+                        calibrationReferenceSamples = samples,
+                        isSamplingColor = false,
+                        error = null,
+                    )
+                }
+            }.onFailure { throwable ->
+                if (throwable !is kotlinx.coroutines.CancellationException) {
+                    _uiState.value = _uiState.value.copy(
+                        isSamplingColor = false,
+                        error = throwable.message ?: "Control color calibration failed",
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearColorCalibrationReferences() {
+        processingJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            pendingColorCalibration = null,
+            calibrationReferencePoints = emptyList(),
+            calibrationReferenceSamples = emptyList(),
+            isSamplingColor = false,
+            error = null,
+        )
+    }
+
     private fun combineCalibrationSamples(
-        existing: ColorCalibrationSample?,
-        added: ColorCalibrationSample,
-        existingCount: Int,
-    ): ColorCalibrationSample {
-        if (existing == null || existingCount == 0) return added
-        val totalCount = existingCount + 1
+        samples: List<ColorCalibrationSample>,
+    ): ColorCalibrationSample? {
+        if (samples.isEmpty()) return null
+        fun median(values: List<Double>): Double = values.sorted()[values.size / 2]
+        val hueCenters = samples.map { (it.hueRange.start + it.hueRange.endInclusive) / 2.0 }
+        val hueHalfWidths = samples.map {
+            (it.hueRange.endInclusive - it.hueRange.start) / 2.0
+        }
+        val hueCenter = median(hueCenters)
+        val hueHalfWidth = median(hueHalfWidths)
         return ColorCalibrationSample(
-            hueRange = minOf(existing.hueRange.start, added.hueRange.start)..
-                maxOf(existing.hueRange.endInclusive, added.hueRange.endInclusive),
-            saturationRange = minOf(existing.saturationRange.start, added.saturationRange.start)..
-                maxOf(existing.saturationRange.endInclusive, added.saturationRange.endInclusive),
-            valueRange = minOf(existing.valueRange.start, added.valueRange.start)..
-                maxOf(existing.valueRange.endInclusive, added.valueRange.endInclusive),
-            estimatedRadius = (
-                existing.estimatedRadius * existingCount + added.estimatedRadius
-                ) / totalCount,
+            hueRange = (hueCenter - hueHalfWidth).coerceAtLeast(0.0)..
+                (hueCenter + hueHalfWidth).coerceAtMost(179.0),
+            saturationRange = median(samples.map { it.saturationRange.start })..
+                median(samples.map { it.saturationRange.endInclusive }),
+            valueRange = median(samples.map { it.valueRange.start })..
+                median(samples.map { it.valueRange.endInclusive }),
+            estimatedRadius = median(samples.map { it.estimatedRadius.toDouble() }).toFloat(),
         )
     }
 

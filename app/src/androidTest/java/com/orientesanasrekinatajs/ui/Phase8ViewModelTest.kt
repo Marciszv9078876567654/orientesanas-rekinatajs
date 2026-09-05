@@ -195,6 +195,31 @@ class Phase8ViewModelTest {
     }
 
     @Test
+    fun mapProcessing_movesAndClearsCalibrationReferences() {
+        val sample = ColorCalibrationSample(140.0..160.0, 80.0..255.0, 60.0..255.0, 10f)
+        val engine = FakeProcessingEngine(calibrationSample = sample)
+        val viewModel = MapProcessingViewModel(engine, Dispatchers.Unconfined)
+        onMainThread {
+            viewModel.processImage(Uri.parse("content://test/calibration-move"))
+            viewModel.startColorCalibration()
+            viewModel.applyColorCalibrationSample(Point2D(20f, 20f))
+            viewModel.moveColorCalibrationReference(0, Point2D(30f, 35f))
+        }
+
+        assertEquals(listOf(Point2D(30f, 35f)), viewModel.uiState.value.calibrationReferencePoints)
+        assertTrue(viewModel.uiState.value.isSamplingColor)
+        Thread.sleep(250)
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        assertTrue(!viewModel.uiState.value.isSamplingColor)
+        assertEquals(2, engine.calls.count { it == "sample" })
+
+        onMainThread { viewModel.clearColorCalibrationReferences() }
+
+        assertTrue(viewModel.uiState.value.calibrationReferencePoints.isEmpty())
+        assertEquals(null, viewModel.uiState.value.pendingColorCalibration)
+    }
+
+    @Test
     fun routing_buildsShortestRouteWithSegmentsAndTotals() {
         val viewModel = RoutingViewModel(Dispatchers.Unconfined)
         val points = routePoints()

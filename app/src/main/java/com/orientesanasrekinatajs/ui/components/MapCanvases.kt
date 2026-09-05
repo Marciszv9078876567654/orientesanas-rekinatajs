@@ -566,33 +566,40 @@ fun DistanceCalibrationCanvas(
     }
 }
 
-/** Reuses the map viewport and tap conversion to select one known control symbol. */
+/** Reuses the point editor viewport so calibration references can be added and adjusted. */
 @Composable
 fun ControlColorCalibrationCanvas(
     bitmap: Bitmap,
     referencePoints: List<Point2D> = emptyList(),
     onPointSelected: (Point2D) -> Unit,
+    onReferenceMoved: (Int, Point2D) -> Unit,
     rotationQuarterTurns: Int = 0,
     rotationOffsetDegrees: Float = 0f,
     rotationGesturesEnabled: Boolean = true,
     onRotationGesture: (Float) -> Unit = {},
+    recenterKey: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    DistanceCalibrationCanvas(
+    val references = referencePoints.mapIndexed { index, point ->
+        ControlPoint(id = "calibration-reference-$index", code = index + 1, center = point)
+    }
+    InteractiveControlPointCanvas(
         bitmap = bitmap,
-        // Keep this as a one-tap surface. Retaining the first failed tap as `start` makes
-        // DistanceCalibrationCanvas interpret every later tap as the unused line endpoint and
-        // resubmit the old location, so the user can never correct an imprecise first tap.
-        start = null,
-        end = null,
-        selectionPoints = referencePoints,
-        onLineChange = { point, _ ->
-            point?.let(onPointSelected)
+        points = references,
+        onPointMoved = { moved ->
+            val index = references.indexOfFirst { it.id == moved.id }
+            if (index >= 0) onReferenceMoved(index, moved.center)
         },
+        onPointSelected = {},
+        onEmptyPointSelected = onPointSelected,
+        onViewportCenterChange = {},
         rotationQuarterTurns = rotationQuarterTurns,
         rotationOffsetDegrees = rotationOffsetDegrees,
         rotationGesturesEnabled = rotationGesturesEnabled,
         onRotationGesture = onRotationGesture,
+        recenterKey = recenterKey,
+        selectionMarkerStyle = true,
+        showPlacementCrosshair = false,
         modifier = modifier.testTag("controlColorCalibrationCanvas"),
     )
 }
@@ -608,14 +615,18 @@ fun InteractiveControlPointCanvas(
     onRotationGesture: (Float) -> Unit = {},
     onPointMoved: (ControlPoint) -> Unit,
     onPointSelected: (ControlPoint) -> Unit,
+    onEmptyPointSelected: (Point2D) -> Unit = {},
     onViewportCenterChange: (Point2D) -> Unit,
     recenterKey: Int = 0,
+    selectionMarkerStyle: Boolean = false,
+    showPlacementCrosshair: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val latestPoints by rememberUpdatedState(points)
     val latestOnPointMoved by rememberUpdatedState(onPointMoved)
     val latestOnPointSelected by rememberUpdatedState(onPointSelected)
+    val latestOnEmptyPointSelected by rememberUpdatedState(onEmptyPointSelected)
     val latestRotationOffset by rememberUpdatedState(rotationOffsetDegrees)
     val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
     val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
@@ -676,6 +687,7 @@ fun InteractiveControlPointCanvas(
                         ?.first
                     var moved = 0f
                     var usedMultiTouch = false
+                    var lastPosition = down.position
 
                     while (true) {
                         val event = awaitPointerEvent()
@@ -698,6 +710,7 @@ fun InteractiveControlPointCanvas(
                             event.changes.forEach { it.consume() }
                         } else {
                             event.changes.firstOrNull()?.let { change ->
+                                lastPosition = change.position
                                 if (change.pressed) {
                                     val delta = change.position - change.previousPosition
                                     moved += delta.getDistance()
@@ -719,7 +732,16 @@ fun InteractiveControlPointCanvas(
                         if (event.changes.all { !it.pressed }) break
                     }
                     if (!usedMultiTouch && moved <= TAP_SLOP_PX) {
-                        latestPoints.firstOrNull { it.id == selectedId }?.let(latestOnPointSelected)
+                        val selected = latestPoints.firstOrNull { it.id == selectedId }
+                        if (selected != null) {
+                            latestOnPointSelected(selected)
+                        } else {
+                            val viewport = viewportTransform(
+                                size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
+                                rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
+                            )
+                            latestOnEmptyPointSelected(viewport.toImage(lastPosition))
+                        }
                     }
                 }
             },
@@ -732,7 +754,17 @@ fun InteractiveControlPointCanvas(
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
         }
-        drawReferencePoints(points, viewport, zoom, useTypeColors = true)
+        if (selectionMarkerStyle) {
+            val selectionScale = sqrt(zoom).coerceAtMost(2.4f)
+            points.forEach { point ->
+                val center = viewport.toCanvas(point.center)
+                drawCircle(Color.White, radius = 12f * selectionScale, center = center)
+                drawCircle(Color(0xFFFF8F00), radius = 8f * selectionScale, center = center)
+            }
+        } else {
+            drawReferencePoints(points, viewport, zoom, useTypeColors = true)
+        }
+        if (!showPlacementCrosshair) return@Canvas
         drawLine(
             color = Color.White,
             start = center - Offset(36f, 0f),

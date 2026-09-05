@@ -244,7 +244,7 @@
     <string name="map_export_failed">Karti neizdevās eksportēt.</string>
     <string name="map_import_failed">Izvēlētais fails nav derīga eksportēta karte.</string>
     <string name="calibrate_control_color">Kalibrēt pēc zināma kontrolpunkta</string>
-    <string name="calibrate_control_color_help">Pieskarieties viena vai vairāku skaidri redzamu kontrolpunktu apļu centriem. Atlasītās atsauces ir atzīmētas oranžā krāsā. Pilna punktu noteikšana sāksies tikai pēc “Apstiprināt” izvēles; “Atcelt” saglabās pašreizējos punktus.</string>
+    <string name="calibrate_control_color_help">Pieskarieties viena vai vairāku skaidri redzamu kontrolpunktu apļu centriem. Velciet oranžo atzīmi, lai koriģētu tās vietu. Pilna punktu noteikšana sāksies tikai pēc “Apstiprināt” izvēles; “Atcelt” saglabās pašreizējos punktus.</string>
     <string name="calibrate_control_color_warning_title">Aizstāt atrastos kontrolpunktus?</string>
     <string name="calibrate_control_color_warning">Jaunās kalibrēšanas apstiprināšana var aizstāt visus esošos kontrolpunktus un notīrīs attāluma kalibrēšanas līniju. Vai turpināt?</string>
     <string name="calibrate_control_color_failed">Kalibrēšana neizdevās</string>

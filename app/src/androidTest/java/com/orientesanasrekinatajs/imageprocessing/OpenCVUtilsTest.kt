@@ -232,6 +232,60 @@ class OpenCVUtilsTest {
     }
 
     @Test
+    fun sampleControlPointColorFindsBrokenRingWithoutInflatingRadius() {
+        val bitmap = Bitmap.createBitmap(220, 220, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawArc(
+            RectF(80f, 80f, 140f, 140f),
+            18f,
+            255f,
+            false,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.MAGENTA
+                style = Paint.Style.STROKE
+                strokeWidth = 8f
+            },
+        )
+
+        val sample = OpenCVUtils.sampleControlPointColor(bitmap, Point2D(110f, 110f))
+
+        assertNotNull(sample)
+        assertTrue(sample!!.hueRange.contains(150.0))
+        assertTrue(sample.toString(), abs(sample.estimatedRadius - 34f) < 5f)
+    }
+
+    @Test
+    fun calibratedDetectionDoesNotRejectRingsWhenReferenceRadiusIsWrong() {
+        val bitmap = Bitmap.createBitmap(220, 220, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawCircle(
+            110f,
+            110f,
+            30f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.MAGENTA
+                style = Paint.Style.STROKE
+                strokeWidth = 8f
+            },
+        )
+        val inaccurateReference = ColorCalibrationSample(
+            hueRange = 140.0..160.0,
+            saturationRange = 80.0..255.0,
+            valueRange = 60.0..255.0,
+            estimatedRadius = 8f,
+        )
+
+        val symbols = OpenCVUtils.detectControlSymbols(
+            bitmap,
+            colorCalibration = inaccurateReference,
+        )
+
+        assertTrue(symbols.any { symbol -> symbol.center.distanceTo(Point2D(110f, 110f)) < 5f })
+    }
+
+    @Test
     fun sampleControlPointColorRejectsNonCircularArea() {
         val bitmap = Bitmap.createBitmap(220, 220, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

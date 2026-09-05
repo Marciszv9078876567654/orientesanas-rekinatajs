@@ -83,6 +83,8 @@ internal fun EditMapScreen(
     onClearControlPoints: () -> Unit,
     onStartColorCalibration: () -> Unit,
     onApplyColorCalibrationSample: (Point2D) -> Unit,
+    onMoveColorCalibrationReference: (Int, Point2D) -> Unit,
+    onClearColorCalibrationReferences: () -> Unit,
     onConfirmColorCalibration: () -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
@@ -109,23 +111,43 @@ internal fun EditMapScreen(
     var showCalibrationHelp by rememberSaveable(processingState.isCalibratingColor) {
         mutableStateOf(processingState.isCalibratingColor && calibrationUsageTipsEnabled)
     }
+    var calibrationRecenterKey by rememberSaveable { mutableIntStateOf(0) }
     if (processingState.isCalibratingColor) {
         BackHandler(onBack = onCancelColorCalibration)
         Column(Modifier.fillMaxSize()) {
             ScreenTopBar(
                 title = stringResource(R.string.calibrate_control_color),
                 onBack = onCancelColorCalibration,
+                action = if (processingState.calibrationReferencePoints.isNotEmpty()) ({
+                    IconButton(onClick = onClearColorCalibrationReferences) {
+                        Icon(
+                            Icons.Default.DeleteForever,
+                            contentDescription = stringResource(R.string.clear_points),
+                        )
+                    }
+                }) else null,
             )
-            ControlColorCalibrationCanvas(
-                bitmap = rectified,
-                referencePoints = processingState.calibrationReferencePoints,
-                onPointSelected = onApplyColorCalibrationSample,
-                rotationQuarterTurns = rotation,
-                rotationOffsetDegrees = rotationOffsetDegrees,
-                rotationGesturesEnabled = rotationGesturesEnabled,
-                onRotationGesture = onRotationGesture,
-                modifier = Modifier.fillMaxWidth().weight(1f),
-            )
+            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+                ControlColorCalibrationCanvas(
+                    bitmap = rectified,
+                    referencePoints = processingState.calibrationReferencePoints,
+                    onPointSelected = onApplyColorCalibrationSample,
+                    onReferenceMoved = onMoveColorCalibrationReference,
+                    rotationQuarterTurns = rotation,
+                    rotationOffsetDegrees = rotationOffsetDegrees,
+                    rotationGesturesEnabled = rotationGesturesEnabled,
+                    onRotationGesture = onRotationGesture,
+                    recenterKey = calibrationRecenterKey,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                MapOverlayButtons(
+                    onRotate = {
+                        onRotationChange(nextClockwiseQuarterTurn(rotation, rotationOffsetDegrees))
+                    },
+                    onRecenter = { onSnapRotation(); calibrationRecenterKey++ },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

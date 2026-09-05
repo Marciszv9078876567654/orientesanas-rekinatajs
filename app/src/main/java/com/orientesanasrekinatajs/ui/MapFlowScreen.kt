@@ -71,6 +71,8 @@ internal fun MapFlowScreen(
     onClearControlPoints: () -> Unit,
     onStartColorCalibration: () -> Unit,
     onApplyColorCalibrationSample: (Point2D) -> Unit,
+    onMoveColorCalibrationReference: (Int, Point2D) -> Unit,
+    onClearColorCalibrationReferences: () -> Unit,
     onConfirmColorCalibration: () -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
@@ -387,6 +389,8 @@ internal fun MapFlowScreen(
             },
             onStartColorCalibration = onStartColorCalibration,
             onApplyColorCalibrationSample = onApplyColorCalibrationSample,
+            onMoveColorCalibrationReference = onMoveColorCalibrationReference,
+            onClearColorCalibrationReferences = onClearColorCalibrationReferences,
             onConfirmColorCalibration = {
                 isDirty = true
                 mapEditChangedSinceEntry = true
