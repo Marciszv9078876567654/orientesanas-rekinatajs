@@ -563,6 +563,7 @@ fun DistanceCalibrationCanvas(
 @Composable
 fun ControlColorCalibrationCanvas(
     bitmap: Bitmap,
+    controlPoints: List<ControlPoint> = emptyList(),
     onPointSelected: (Point2D) -> Unit,
     rotationQuarterTurns: Int = 0,
     rotationOffsetDegrees: Float = 0f,
@@ -577,6 +578,7 @@ fun ControlColorCalibrationCanvas(
         // resubmit the old location, so the user can never correct an imprecise first tap.
         start = null,
         end = null,
+        controlPoints = controlPoints,
         onLineChange = { point, _ ->
             point?.let(onPointSelected)
         },
@@ -857,13 +859,17 @@ private fun DrawScope.drawReferencePoints(
         labelPaint.alpha = ((if (isMuted) 125 else 255) * visibilityAlpha).toInt()
         outlinePaint.alpha = ((if (isMuted) 150 else 255) * visibilityAlpha).toInt()
         val center = viewport.toCanvas(point.center)
-        val markerColor = if (
+        val markerColor = if (isMuted) {
+            Color(0xFF7A7A7A)
+        } else if (point.needsReview) {
+            // Review points must remain obvious in both the overview and point editor, where
+            // type colors and route highlighting would otherwise make the '?' easy to miss.
+            Color(0xFFFF8F00)
+        } else if (
             !isMuted && point.type == ControlPointType.CONTROL &&
             highlightedPointColors[point.id] != null
         ) {
             requireNotNull(highlightedPointColors[point.id])
-        } else if (isMuted) {
-            Color(0xFF7A7A7A)
         } else if (useTypeColors) {
             when (point.type) {
                 ControlPointType.START -> Color(0xFF2E7D32)

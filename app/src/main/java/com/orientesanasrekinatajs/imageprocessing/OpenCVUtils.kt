@@ -7,8 +7,10 @@ import com.orientesanasrekinatajs.domain.model.ControlPointType
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
@@ -51,6 +53,13 @@ object OpenCVUtils {
     private const val CALIBRATED_RADIUS_TOLERANCE = 0.50
     private const val UNBACKED_RADIUS_MIN_FACTOR = 0.68
     private const val UNBACKED_RADIUS_MAX_FACTOR = 1.35
+    private const val HOUGH_RADIUS_MIN_FACTOR = 0.82
+    private const val HOUGH_RADIUS_MAX_FACTOR = 1.20
+    private const val TRIANGLE_RADIUS_MIN_FACTOR = 0.75
+    private const val TRIANGLE_RADIUS_MAX_FACTOR = 1.45
+    private const val MIN_TRIANGLE_SIDE_RATIO = 0.68
+    private const val MIN_HOUGH_RING_COVERAGE = 0.34
+    private const val MAX_HOUGH_CENTER_INK_FRACTION = 0.22
 
     private val isOpenCvLoaded: Boolean by lazy { OpenCVLoader.initLocal() }
 
@@ -312,6 +321,8 @@ object OpenCVUtils {
         val hsv = Mat()
         val mask = Mat()
         val closedMask = Mat()
+        val blurredMask = Mat()
+        val houghCircles = Mat()
         val hierarchy = Mat()
         val contours = mutableListOf<MatOfPoint>()
         val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(3.0, 3.0))
@@ -352,19 +363,103 @@ object OpenCVUtils {
                 .filter { it.shape == SymbolShape.CIRCLE && it.ringEvidence == RingEvidence.MATCH }
                 .map(SymbolCandidate::radius)
                 .sorted()
-            val referenceRadius = ringRadii.takeIf(List<Float>::isNotEmpty)
-                ?.let { radii -> radii[radii.size / 2] }
-            val candidates = allCandidates.filter { candidate ->
-                when {
-                    candidate.shape == SymbolShape.TRIANGLE -> true
-                    candidate.ringEvidence == RingEvidence.MATCH -> true
-                    requireRingHole || candidate.ringEvidence == RingEvidence.MISMATCH -> false
-                    referenceRadius == null -> true
-                    else -> candidate.radius in
-                        (referenceRadius * UNBACKED_RADIUS_MIN_FACTOR)..
-                        (referenceRadius * UNBACKED_RADIUS_MAX_FACTOR)
+            val referenceRadius = colorCalibration?.estimatedRadius
+                ?: ringRadii.takeIf(List<Float>::isNotEmpty)
+                    ?.let { radii -> radii[radii.size / 2] }
+            val recoveredCircles = referenceRadius?.let { expectedRadius ->
+                Imgproc.GaussianBlur(mask, blurredMask, Size(5.0, 5.0), 1.4)
+                val houghMinimumRadius = max(
+                    minimumRadius,
+                    expectedRadius * HOUGH_RADIUS_MIN_FACTOR,
+                ).roundToInt()
+                val houghMaximumRadius = minOf(
+                    maximumRadius,
+                    expectedRadius * HOUGH_RADIUS_MAX_FACTOR,
+                ).roundToInt()
+                Imgproc.HoughCircles(
+                    blurredMask,
+                    houghCircles,
+                    Imgproc.HOUGH_GRADIENT,
+                    1.2,
+                    expectedRadius * 1.5,
+                    80.0,
+                    max(8.0, expectedRadius * 0.45),
+                    houghMinimumRadius,
+                    houghMaximumRadius,
+                )
+                (0 until houghCircles.cols()).mapNotNull { index ->
+                    val circle = houghCircles.get(0, index) ?: return@mapNotNull null
+                    val center = Point2D(circle[0].toFloat(), circle[1].toFloat())
+                    val radius = circle[2].toFloat()
+                    val nearbyContours = allCandidates.filter { candidate ->
+                        candidate.center.distanceTo(center) <=
+                            max(candidate.radius, radius) * 0.40f
+                    }
+                    val overlapsAcceptedCircle = nearbyContours.any { candidate ->
+                        candidate.shape == SymbolShape.CIRCLE &&
+                            candidate.ringEvidence != RingEvidence.MISMATCH
+                    }
+                    val overlapsTriangle = nearbyContours.any {
+                        it.shape == SymbolShape.TRIANGLE
+                    }
+                    val concentricRejectedCircles = nearbyContours.count {
+                        it.shape == SymbolShape.CIRCLE &&
+                            it.ringEvidence == RingEvidence.MISMATCH
+                    }
+                    if (overlapsAcceptedCircle || overlapsTriangle) {
+                        return@mapNotNull null
+                    }
+                    val coverage = ringInkCoverage(mask, center, radius)
+                    if (coverage < MIN_HOUGH_RING_COVERAGE ||
+                        diskInkFraction(mask, center, radius * 0.25f) >
+                        MAX_HOUGH_CENTER_INK_FRACTION
+                    ) {
+                        return@mapNotNull null
+                    }
+                    SymbolCandidate(
+                        center = center,
+                        radius = radius,
+                        shape = SymbolShape.CIRCLE,
+                        ringEvidence = RingEvidence.NONE,
+                        shapeConfidence = coverage,
+                        ringMultiplicity = if (concentricRejectedCircles >= 1) 3 else 1,
+                    )
                 }
-            }.sortedByDescending(SymbolCandidate::radius)
+            }.orEmpty()
+            val circleCandidates = (allCandidates + recoveredCircles).mapNotNull { candidate ->
+                if (candidate.shape != SymbolShape.CIRCLE) return@mapNotNull null
+                val concentricInnerRing = allCandidates.any { inner ->
+                    inner !== candidate && inner.shape == SymbolShape.CIRCLE &&
+                        inner.radius <= candidate.radius * 0.70f &&
+                        inner.radius >= candidate.radius * 0.35f &&
+                        inner.center.distanceTo(candidate.center) <= candidate.radius * 0.15f
+                }
+                when {
+                    candidate.ringEvidence == RingEvidence.MATCH -> candidate
+                    candidate.ringEvidence == RingEvidence.MISMATCH && concentricInnerRing ->
+                        candidate.copy(ringMultiplicity = 3)
+                    requireRingHole || candidate.ringEvidence == RingEvidence.MISMATCH -> null
+                    referenceRadius == null -> candidate
+                    candidate.radius in
+                        (referenceRadius * UNBACKED_RADIUS_MIN_FACTOR)..
+                        (referenceRadius * UNBACKED_RADIUS_MAX_FACTOR) -> candidate
+                    else -> null
+                }
+            }
+            // A course has one start. Requiring an equilateral, control-sized triangle prevents
+            // digits and short angular fragments in the ink mask from becoming dozens of starts.
+            val startCandidate = referenceRadius?.let { expectedRadius ->
+                allCandidates.asSequence()
+                    .filter { candidate ->
+                        candidate.shape == SymbolShape.TRIANGLE &&
+                            candidate.radius in
+                            (expectedRadius * TRIANGLE_RADIUS_MIN_FACTOR)..
+                            (expectedRadius * TRIANGLE_RADIUS_MAX_FACTOR)
+                    }
+                    .maxByOrNull(SymbolCandidate::shapeConfidence)
+            }
+            val candidates = (circleCandidates + listOfNotNull(startCandidate))
+                .sortedByDescending(SymbolCandidate::radius)
 
             val symbolGroups = mutableListOf<MutableList<SymbolCandidate>>()
             candidates.forEach { candidate ->
@@ -379,7 +474,8 @@ object OpenCVUtils {
             val detectedSymbols = symbolGroups.map { group ->
                 val largest = group.maxBy(SymbolCandidate::radius)
                 val hasTriangle = group.any { it.shape == SymbolShape.TRIANGLE }
-                val circleCount = group.count { it.shape == SymbolShape.CIRCLE }
+                val circleCount = group.filter { it.shape == SymbolShape.CIRCLE }
+                    .sumOf(SymbolCandidate::ringMultiplicity)
                 val type = when {
                     circleCount >= 3 -> ControlPointType.FINISH
                     hasTriangle && circleCount > 0 -> ControlPointType.START_FINISH
@@ -408,6 +504,8 @@ object OpenCVUtils {
             }
         } finally {
             contours.forEach { it.release() }
+            houghCircles.release()
+            blurredMask.release()
             kernel.release()
             hierarchy.release()
             closedMask.release()
@@ -443,10 +541,23 @@ object OpenCVUtils {
 
             Imgproc.approxPolyDP(contour2f, approximation, perimeter * 0.04, true)
             val integerApproximation = MatOfPoint(*approximation.toArray())
+            var triangleSideRatio = 0.0
             val isTriangle = try {
+                val vertices = approximation.toArray()
+                val sides = if (vertices.size == 3) {
+                    listOf(
+                        pointDistance(vertices[0], vertices[1]),
+                        pointDistance(vertices[1], vertices[2]),
+                        pointDistance(vertices[2], vertices[0]),
+                    )
+                } else {
+                    emptyList()
+                }
+                triangleSideRatio = sides.minOrNull()?.div(sides.maxOrNull() ?: 1.0) ?: 0.0
                 approximation.total() == 3L &&
                     Imgproc.isContourConvex(integerApproximation) &&
-                    circleFillRatio < 0.55 &&
+                    triangleSideRatio >= MIN_TRIANGLE_SIDE_RATIO &&
+                    circleFillRatio in 0.30..0.52 &&
                     area >= minimumRadius * minimumRadius
             } finally {
                 integerApproximation.release()
@@ -463,6 +574,8 @@ object OpenCVUtils {
                     hasConcentricRingHole(contour, childContour, radius[0]) -> RingEvidence.MATCH
                     else -> RingEvidence.MISMATCH
                 },
+                shapeConfidence = if (isTriangle) triangleSideRatio else circularity,
+                ringMultiplicity = 1,
             )
         } finally {
             approximation.release()
@@ -549,7 +662,12 @@ object OpenCVUtils {
                     // A filled patch or thick line can surround a tiny radius, but a ring has
                     // substantially less matching ink near its center than on its perimeter.
                     if (innerAngleCount >= angleCount * 0.7) continue
-                    if (angleCount > bestCoverage) {
+                    // Several nearby radii can cover the same thick printed stroke. On ties,
+                    // prefer the outer one so the resulting radius describes the full symbol
+                    // rather than its inner edge.
+                    if (angleCount > bestCoverage ||
+                        (angleCount == bestCoverage && angleCount > 0 && radius > bestRadius)
+                    ) {
                         bestCoverage = angleCount
                         bestHue = hue
                         bestRadius = radius
@@ -576,6 +694,14 @@ object OpenCVUtils {
                 }
             }
             if (sampled.size < 12) return null
+            val sampledRadius = percentile(
+                sampled.map { pixel ->
+                    val dx = pixel.x - tapPoint.x
+                    val dy = pixel.y - tapPoint.y
+                    sqrt((dx * dx + dy * dy).toDouble())
+                },
+                0.95,
+            ).toFloat()
 
             val hueRange = percentile(sampled.map(SamplePixel::hue), 0.05)..
                 percentile(sampled.map(SamplePixel::hue), 0.95)
@@ -592,7 +718,7 @@ object OpenCVUtils {
                 valueRange = (valueRange.start - VALUE_TOLERANCE_DOWN)
                     .coerceAtLeast(MIN_CALIBRATED_VALUE)..
                     (valueRange.endInclusive + VALUE_TOLERANCE_UP).coerceAtMost(255.0),
-                estimatedRadius = bestRadius.toFloat(),
+                estimatedRadius = sampledRadius,
             )
         } finally {
             hsv.release()
@@ -686,6 +812,48 @@ object OpenCVUtils {
         return centerOffset <= outerRadius * MAX_RING_CENTER_OFFSET_RADIUS_FRACTION
     }
 
+    /** Fraction of angular samples that encounter selected ink near a proposed circumference. */
+    private fun ringInkCoverage(mask: Mat, center: Point2D, radius: Float): Double {
+        val samples = 72
+        val radialTolerance = (radius * 0.18f).roundToInt().coerceIn(2, 5)
+        var covered = 0
+        repeat(samples) { sample ->
+            val angle = sample * 2.0 * PI / samples
+            val hasInk = (-radialTolerance..radialTolerance).any { radialOffset ->
+                val sampledRadius = radius + radialOffset
+                val x = (center.x + cos(angle) * sampledRadius).roundToInt()
+                val y = (center.y + sin(angle) * sampledRadius).roundToInt()
+                x in 0 until mask.cols() && y in 0 until mask.rows() &&
+                    (mask.get(y, x)?.getOrNull(0) ?: 0.0) > 0.0
+            }
+            if (hasInk) covered++
+        }
+        return covered.toDouble() / samples
+    }
+
+    private fun diskInkFraction(mask: Mat, center: Point2D, radius: Float): Double {
+        val integerRadius = radius.roundToInt().coerceAtLeast(1)
+        var total = 0
+        var ink = 0
+        for (dy in -integerRadius..integerRadius) {
+            for (dx in -integerRadius..integerRadius) {
+                if (dx * dx + dy * dy > integerRadius * integerRadius) continue
+                val x = center.x.roundToInt() + dx
+                val y = center.y.roundToInt() + dy
+                if (x !in 0 until mask.cols() || y !in 0 until mask.rows()) continue
+                total++
+                if ((mask.get(y, x)?.getOrNull(0) ?: 0.0) > 0.0) ink++
+            }
+        }
+        return if (total == 0) 1.0 else ink.toDouble() / total
+    }
+
+    private fun pointDistance(first: Point, second: Point): Double {
+        val dx = first.x - second.x
+        val dy = first.y - second.y
+        return sqrt(dx * dx + dy * dy)
+    }
+
     private fun orderedBoundary(points: List<Point>): MapBoundary {
         require(points.size == 4)
         val centerX = points.sumOf { it.x } / points.size
@@ -715,6 +883,8 @@ object OpenCVUtils {
         val radius: Float,
         val shape: SymbolShape,
         val ringEvidence: RingEvidence,
+        val shapeConfidence: Double,
+        val ringMultiplicity: Int,
     )
 
     private data class SamplePixel(

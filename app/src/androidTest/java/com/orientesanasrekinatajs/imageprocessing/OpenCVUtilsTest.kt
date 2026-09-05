@@ -179,6 +179,34 @@ class OpenCVUtilsTest {
     }
 
     @Test
+    fun detectionEmitsAtMostOneStartFromMultipleTriangularContours() {
+        val bitmap = Bitmap.createBitmap(600, 240, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.MAGENTA
+            style = Paint.Style.STROKE
+            strokeWidth = 6f
+        }
+        canvas.drawCircle(70f, 120f, 30f, stroke)
+        listOf(220f, 370f, 520f).forEach { centerX ->
+            canvas.drawPath(
+                Path().apply {
+                    moveTo(centerX, 84f)
+                    lineTo(centerX - 32f, 140f)
+                    lineTo(centerX + 32f, 140f)
+                    close()
+                },
+                stroke,
+            )
+        }
+
+        val symbols = OpenCVUtils.detectControlSymbols(bitmap)
+
+        assertEquals(1, symbols.count { it.type == ControlPointType.START })
+    }
+
+    @Test
     fun sampleControlPointColorFindsKnownRingColorAndRadius() {
         val bitmap = Bitmap.createBitmap(220, 220, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -200,7 +228,7 @@ class OpenCVUtilsTest {
         assertTrue(sample!!.hueRange.contains(150.0))
         assertTrue(sample.saturationRange.contains(255.0))
         assertTrue(sample.valueRange.contains(255.0))
-        assertTrue(abs(sample.estimatedRadius - 34f) < 4f)
+        assertTrue(sample.toString(), abs(sample.estimatedRadius - 34f) < 4f)
     }
 
     @Test

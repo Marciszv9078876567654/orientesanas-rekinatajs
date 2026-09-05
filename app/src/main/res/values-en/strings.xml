@@ -241,7 +241,9 @@
     <string name="map_export_failed">The map could not be exported.</string>
     <string name="map_import_failed">The selected file is not a valid exported map.</string>
     <string name="calibrate_control_color">Calibrate from a known control</string>
-    <string name="calibrate_control_color_help">Tap a known control circle. Its color and size will be used to detect the points again.</string>
+    <string name="calibrate_control_color_help">Tap the center of a clear control circle to preview newly detected points. Tap another control to retry, then Confirm to replace the current points or Cancel to keep them.</string>
+    <string name="calibrate_control_color_warning_title">Replace detected controls?</string>
+    <string name="calibrate_control_color_warning">Confirming a new calibration can replace all existing controls and will clear the distance calibration line. Continue?</string>
     <string name="calibrate_control_color_failed">Calibration failed</string>
     <string name="points_need_review_title">Control points need review</string>
     <plurals name="points_need_review">

@@ -50,6 +50,9 @@ data class MapProcessingUiState(
     val manualBoundaryRequired: Boolean = false,
     val isCalibratingColor: Boolean = false,
     val colorCalibration: ColorCalibrationSample? = null,
+    val pendingColorCalibration: ColorCalibrationSample? = null,
+    val calibrationPreviewPoints: List<ControlPoint>? = null,
+    val isSamplingColor: Boolean = false,
     val reviewSummaryDismissed: Boolean = false,
 ) {
     val isProcessing: Boolean
@@ -224,11 +227,42 @@ class MapProcessingViewModel internal constructor(
     /** Enters the single-tap control-ink calibration mode on the rectified map. */
     fun startColorCalibration() {
         if (_uiState.value.rectifiedBitmap == null) return
-        _uiState.value = _uiState.value.copy(isCalibratingColor = true, error = null)
+        _uiState.value = _uiState.value.copy(
+            isCalibratingColor = true,
+            pendingColorCalibration = null,
+            calibrationPreviewPoints = null,
+            isSamplingColor = false,
+            error = null,
+        )
     }
 
     fun cancelColorCalibration() {
-        _uiState.value = _uiState.value.copy(isCalibratingColor = false, error = null)
+        processingJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            isCalibratingColor = false,
+            pendingColorCalibration = null,
+            calibrationPreviewPoints = null,
+            isSamplingColor = false,
+            error = null,
+        )
+    }
+
+    /** Applies the sampled preview as a replacement for the previous automatic/manual points. */
+    fun confirmColorCalibration() {
+        val current = _uiState.value
+        val sample = current.pendingColorCalibration ?: return
+        val preview = current.calibrationPreviewPoints ?: return
+        _uiState.value = current.copy(
+            controlPoints = preview,
+            colorCalibration = sample,
+            pendingColorCalibration = null,
+            calibrationPreviewPoints = null,
+            isCalibratingColor = false,
+            isSamplingColor = false,
+            savedContentDirty = true,
+            error = null,
+            reviewSummaryDismissed = preview.none(ControlPoint::needsReview),
+        )
     }
 
     fun dismissError() {
@@ -239,55 +273,41 @@ class MapProcessingViewModel internal constructor(
         _uiState.value = _uiState.value.copy(reviewSummaryDismissed = true)
     }
 
-    /** Samples one known circle and adds newly detected points without replacing user edits. */
+    /** Samples one known circle and stages a replacement point set for explicit confirmation. */
     fun applyColorCalibrationSample(tapPoint: Point2D) {
         val current = _uiState.value
         val rectified = current.rectifiedBitmap ?: return
         processingJob?.cancel()
         processingJob = viewModelScope.launch {
+            _uiState.value = current.copy(isSamplingColor = true, error = null)
             runCatching {
                 withContext(workerDispatcher) {
                     val sample = engine.sampleControlPointColor(rectified, tapPoint)
                     if (sample == null) {
                         _uiState.value = current.copy(
                             isCalibratingColor = true,
+                            isSamplingColor = false,
                             error = "Couldn't identify a control symbol there. Try tapping more precisely.",
                         )
                         return@withContext
                     }
-                    _uiState.value = current.copy(
-                        stage = MapProcessingStage.DETECTING_CONTROLS,
-                        colorCalibration = sample,
-                        error = null,
-                    )
-                    val detected = detectControlPoints(rectified, sample)
+                    val symbols = engine.detectControlSymbols(rectified, sample)
+                    val detected = recognizeControlPoints(rectified, symbols, sample)
                     if (detected.isEmpty()) {
                         _uiState.value = current.copy(
-                            colorCalibration = sample,
                             isCalibratingColor = true,
-                            stage = MapProcessingStage.COMPLETE,
+                            isSamplingColor = false,
                             error = "Color sampled, but no matching control circles were found. " +
                                 "Try another clear control.",
                         )
                         return@withContext
                     }
-                    val proximity = (sample.estimatedRadius * 0.75f).coerceAtLeast(6f)
-                    // Calibration can happen after manual correction. Preserve every existing
-                    // point and only add detections that are not already represented nearby.
-                    val merged = current.controlPoints.toMutableList()
-                    detected.forEach { point ->
-                        if (merged.none { existing -> existing.center.distanceTo(point.center) <= proximity }) {
-                            merged += point
-                        }
-                    }
                     _uiState.value = current.copy(
-                        controlPoints = merged,
-                        colorCalibration = sample,
-                        isCalibratingColor = false,
-                        savedContentDirty = current.savedContentDirty || merged != current.controlPoints,
-                        stage = MapProcessingStage.COMPLETE,
+                        pendingColorCalibration = sample,
+                        calibrationPreviewPoints = detected,
+                        isCalibratingColor = true,
+                        isSamplingColor = false,
                         error = null,
-                        reviewSummaryDismissed = merged.none(ControlPoint::needsReview),
                     )
                 }
             }.onFailure { throwable ->
@@ -295,6 +315,7 @@ class MapProcessingViewModel internal constructor(
                     _uiState.value = current.copy(
                         stage = MapProcessingStage.COMPLETE,
                         isCalibratingColor = true,
+                        isSamplingColor = false,
                         error = throwable.message ?: "Control color calibration failed",
                     )
                 }

@@ -86,6 +86,7 @@ class MainActivity : AppCompatActivity() {
                     },
                     onStartColorCalibration = mapProcessingViewModel::startColorCalibration,
                     onApplyColorCalibrationSample = mapProcessingViewModel::applyColorCalibrationSample,
+                    onConfirmColorCalibration = mapProcessingViewModel::confirmColorCalibration,
                     onCancelColorCalibration = mapProcessingViewModel::cancelColorCalibration,
                     onDismissProcessingError = mapProcessingViewModel::dismissError,
                     onDismissReviewSummary = mapProcessingViewModel::dismissReviewSummary,

@@ -87,6 +87,7 @@ fun OrienteeringApp(
     onClearControlPoints: () -> Unit,
     onStartColorCalibration: () -> Unit,
     onApplyColorCalibrationSample: (Point2D) -> Unit,
+    onConfirmColorCalibration: () -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
     onDismissReviewSummary: () -> Unit,
@@ -215,6 +216,7 @@ fun OrienteeringApp(
                     showPointsPerKilometer = userPreferences.showPointsPerKilometer,
                     showUsageTips = userPreferences.showUsageTips &&
                         usageTipDismissedForUri != processingState.sourceUri?.toString(),
+                    calibrationUsageTipsEnabled = userPreferences.showUsageTips,
                     onUsageTipDismissed = {
                         usageTipDismissedForUri = processingState.sourceUri?.toString()
                     },
@@ -225,6 +227,7 @@ fun OrienteeringApp(
                     onClearControlPoints = onClearControlPoints,
                     onStartColorCalibration = onStartColorCalibration,
                     onApplyColorCalibrationSample = onApplyColorCalibrationSample,
+                    onConfirmColorCalibration = onConfirmColorCalibration,
                     onCancelColorCalibration = onCancelColorCalibration,
                     onDismissProcessingError = onDismissProcessingError,
                     onDismissReviewSummary = onDismissReviewSummary,

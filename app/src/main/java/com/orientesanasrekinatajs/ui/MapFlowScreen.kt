@@ -62,6 +62,7 @@ internal fun MapFlowScreen(
     defaultBudgetMeters: Float,
     showPointsPerKilometer: Boolean,
     showUsageTips: Boolean,
+    calibrationUsageTipsEnabled: Boolean,
     onUsageTipDismissed: () -> Unit,
     onApplyEditedBoundary: (MapBoundary, Point2D?, Point2D?, Float?) -> Unit,
     onUpdateControlPoint: (ControlPoint) -> Unit,
@@ -70,6 +71,7 @@ internal fun MapFlowScreen(
     onClearControlPoints: () -> Unit,
     onStartColorCalibration: () -> Unit,
     onApplyColorCalibrationSample: (Point2D) -> Unit,
+    onConfirmColorCalibration: () -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
     onDismissReviewSummary: () -> Unit,
@@ -351,6 +353,7 @@ internal fun MapFlowScreen(
         EditMapScreen(
             processingState = processingState,
             showUsageTips = showUsageTips,
+            calibrationUsageTipsEnabled = calibrationUsageTipsEnabled,
             onUsageTipDismissed = onUsageTipDismissed,
             onApplyBoundary = {
                 isDirty = true
@@ -384,6 +387,15 @@ internal fun MapFlowScreen(
             },
             onStartColorCalibration = onStartColorCalibration,
             onApplyColorCalibrationSample = onApplyColorCalibrationSample,
+            onConfirmColorCalibration = {
+                isDirty = true
+                mapEditChangedSinceEntry = true
+                lineStart = null
+                lineEnd = null
+                lineDistanceText = ""
+                onInvalidateRoute()
+                onConfirmColorCalibration()
+            },
             onCancelColorCalibration = onCancelColorCalibration,
             onDismissProcessingError = onDismissProcessingError,
             onDismissReviewSummary = onDismissReviewSummary,

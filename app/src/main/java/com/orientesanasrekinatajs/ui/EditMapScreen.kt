@@ -74,6 +74,7 @@ private enum class EditMode { CALIBRATION, CORNERS, POINTS }
 internal fun EditMapScreen(
     processingState: MapProcessingUiState,
     showUsageTips: Boolean,
+    calibrationUsageTipsEnabled: Boolean,
     onUsageTipDismissed: () -> Unit,
     onApplyBoundary: (MapBoundary) -> Unit,
     onUpdateControlPoint: (ControlPoint) -> Unit,
@@ -82,6 +83,7 @@ internal fun EditMapScreen(
     onClearControlPoints: () -> Unit,
     onStartColorCalibration: () -> Unit,
     onApplyColorCalibrationSample: (Point2D) -> Unit,
+    onConfirmColorCalibration: () -> Unit,
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
     onDismissReviewSummary: () -> Unit,
@@ -103,6 +105,10 @@ internal fun EditMapScreen(
     onBack: () -> Unit,
 ) {
     val rectified = requireNotNull(processingState.rectifiedBitmap)
+    var confirmCalibrationStart by rememberSaveable { mutableStateOf(false) }
+    var showCalibrationHelp by rememberSaveable(processingState.isCalibratingColor) {
+        mutableStateOf(processingState.isCalibratingColor && calibrationUsageTipsEnabled)
+    }
     if (processingState.isCalibratingColor) {
         BackHandler(onBack = onCancelColorCalibration)
         Column(Modifier.fillMaxSize()) {
@@ -110,13 +116,9 @@ internal fun EditMapScreen(
                 title = stringResource(R.string.calibrate_control_color),
                 onBack = onCancelColorCalibration,
             )
-            Text(
-                text = stringResource(R.string.calibrate_control_color_help),
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                textAlign = TextAlign.Center,
-            )
             ControlColorCalibrationCanvas(
                 bitmap = rectified,
+                controlPoints = processingState.calibrationPreviewPoints.orEmpty(),
                 onPointSelected = onApplyColorCalibrationSample,
                 rotationQuarterTurns = rotation,
                 rotationOffsetDegrees = rotationOffsetDegrees,
@@ -124,12 +126,32 @@ internal fun EditMapScreen(
                 onRotationGesture = onRotationGesture,
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
-            OutlinedButton(
-                onClick = onCancelColorCalibration,
+            Row(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(stringResource(R.string.cancel))
+                OutlinedButton(
+                    onClick = onCancelColorCalibration,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+                Button(
+                    onClick = onConfirmColorCalibration,
+                    enabled = processingState.calibrationPreviewPoints != null &&
+                        !processingState.isSamplingColor,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
             }
+        }
+        if (showCalibrationHelp && processingState.error == null) {
+            MessageDialog(
+                title = stringResource(R.string.usage_tip_title),
+                message = stringResource(R.string.calibrate_control_color_help),
+                onDismiss = { showCalibrationHelp = false },
+            )
         }
         processingState.error?.let { error ->
             MessageDialog(
@@ -391,7 +413,7 @@ internal fun EditMapScreen(
 
                 EditMode.CALIBRATION -> {
                     OutlinedButton(
-                        onClick = onStartColorCalibration,
+                        onClick = { confirmCalibrationStart = true },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
                         Text(stringResource(R.string.calibrate_control_color))
@@ -499,6 +521,18 @@ internal fun EditMapScreen(
                 showHelp = false
                 onUsageTipDismissed()
             },
+        )
+    }
+
+    if (confirmCalibrationStart) {
+        ConfirmationDialog(
+            title = stringResource(R.string.calibrate_control_color_warning_title),
+            message = stringResource(R.string.calibrate_control_color_warning),
+            onConfirm = {
+                confirmCalibrationStart = false
+                onStartColorCalibration()
+            },
+            onDismiss = { confirmCalibrationStart = false },
         )
     }
 
