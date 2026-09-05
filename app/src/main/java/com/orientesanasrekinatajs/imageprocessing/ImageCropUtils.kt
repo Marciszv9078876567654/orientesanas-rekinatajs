@@ -7,11 +7,12 @@ import kotlin.math.floor
 
 /** Bitmap cropping operations used to prepare small OCR inputs. */
 object ImageCropUtils {
-    private const val ROI_RADIUS_MULTIPLIER = 2.5f
+    private const val ROI_RADIUS_MULTIPLIER = 3.25f
     private const val MIN_OCR_DIMENSION = 32
 
     /**
-     * Crops a square extending 2.5 symbol radii from [center] in every direction.
+     * Crops a square extending 3.25 symbol radii from [center] in every direction. The extra
+     * margin keeps labels intact when they sit beyond a broken circle's estimated outer edge.
      *
      * The requested rectangle is clipped to the bitmap, which keeps symbols near an image edge
      * valid without padding or out-of-bounds failures.

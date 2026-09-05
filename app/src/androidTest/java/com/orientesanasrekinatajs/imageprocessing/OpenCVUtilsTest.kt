@@ -104,6 +104,26 @@ class OpenCVUtilsTest {
     }
 
     @Test
+    fun detectionEmitsAtMostOneFinishFromSeveralDoubleRingShapes() {
+        val bitmap = Bitmap.createBitmap(440, 220, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.MAGENTA
+            style = Paint.Style.STROKE
+            strokeWidth = 8f
+        }
+        listOf(120f, 320f).forEach { centerX ->
+            canvas.drawCircle(centerX, 110f, 35f, stroke)
+            canvas.drawCircle(centerX, 110f, 24f, stroke)
+        }
+
+        val symbols = OpenCVUtils.detectControlSymbols(bitmap)
+
+        assertEquals(symbols.toString(), 1, symbols.count { it.type == ControlPointType.FINISH })
+    }
+
+    @Test
     fun strictRingDetectionAcceptsAnnulusAndRejectsFilledCircle() {
         val bitmap = Bitmap.createBitmap(360, 180, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

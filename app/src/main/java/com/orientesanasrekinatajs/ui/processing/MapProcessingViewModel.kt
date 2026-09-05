@@ -55,6 +55,7 @@ data class MapProcessingUiState(
     val calibrationReferencePoints: List<Point2D> = emptyList(),
     val calibrationReferenceSamples: List<ColorCalibrationSample> = emptyList(),
     val isSamplingColor: Boolean = false,
+    val isConfirmingColorCalibration: Boolean = false,
     val reviewSummaryDismissed: Boolean = false,
 ) {
     val isProcessing: Boolean
@@ -235,6 +236,7 @@ class MapProcessingViewModel internal constructor(
             calibrationReferencePoints = emptyList(),
             calibrationReferenceSamples = emptyList(),
             isSamplingColor = false,
+            isConfirmingColorCalibration = false,
             error = null,
         )
     }
@@ -247,6 +249,7 @@ class MapProcessingViewModel internal constructor(
             calibrationReferencePoints = emptyList(),
             calibrationReferenceSamples = emptyList(),
             isSamplingColor = false,
+            isConfirmingColorCalibration = false,
             error = null,
         )
     }
@@ -258,15 +261,30 @@ class MapProcessingViewModel internal constructor(
         val rectified = current.rectifiedBitmap ?: return
         processingJob?.cancel()
         processingJob = viewModelScope.launch {
-            _uiState.value = current.copy(isSamplingColor = true, error = null)
+            _uiState.value = current.copy(
+                isSamplingColor = true,
+                isConfirmingColorCalibration = true,
+                error = null,
+            )
             runCatching {
                 withContext(workerDispatcher) {
                     val symbols = engine.detectControlSymbols(rectified, sample)
+                    if (symbols.size > MAX_CALIBRATED_SYMBOLS) {
+                        _uiState.value = current.copy(
+                            isCalibratingColor = true,
+                            isSamplingColor = false,
+                            isConfirmingColorCalibration = false,
+                            error = "Calibration matched too much map detail (${symbols.size} points). " +
+                                "Clear the references and select a cleaner control circle.",
+                        )
+                        return@withContext
+                    }
                     val detected = recognizeControlPoints(rectified, symbols, sample)
                     if (detected.isEmpty()) {
                         _uiState.value = current.copy(
                             isCalibratingColor = true,
                             isSamplingColor = false,
+                            isConfirmingColorCalibration = false,
                             error = "No matching control circles were found. Try another reference.",
                         )
                         return@withContext
@@ -279,6 +297,7 @@ class MapProcessingViewModel internal constructor(
                         calibrationReferenceSamples = emptyList(),
                         isCalibratingColor = false,
                         isSamplingColor = false,
+                        isConfirmingColorCalibration = false,
                         savedContentDirty = true,
                         error = null,
                         reviewSummaryDismissed = detected.none(ControlPoint::needsReview),
@@ -289,6 +308,7 @@ class MapProcessingViewModel internal constructor(
                     _uiState.value = current.copy(
                         isCalibratingColor = true,
                         isSamplingColor = false,
+                        isConfirmingColorCalibration = false,
                         error = throwable.message ?: "Control color calibration failed",
                     )
                 }
@@ -534,7 +554,21 @@ class MapProcessingViewModel internal constructor(
                     try {
                         val isolated = engine.isolateInkColor(roi, colorCalibration)
                         try {
-                            engine.extractControlNumber(isolated) ?: run {
+                            val isolatedCode = try {
+                                engine.extractControlNumber(isolated)
+                            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                                throw cancellation
+                            } catch (_: Throwable) {
+                                null
+                            }
+                            isolatedCode ?: if (isolated !== roi) {
+                                // Color isolation can erase faded or antialiased digits. Preserve
+                                // its clean high-contrast path, but retry the original crop before
+                                // marking the point for review.
+                                engine.extractControlNumber(roi)
+                            } else {
+                                null
+                            } ?: run {
                                 needsReview = true
                                 0
                             }
@@ -607,6 +641,8 @@ class MapProcessingViewModel internal constructor(
     }
 
     companion object {
+        private const val MAX_CALIBRATED_SYMBOLS = 80
+
         fun factory(context: Context): ViewModelProvider.Factory {
             val engine = AndroidMapProcessingEngine(context.applicationContext)
             return object : ViewModelProvider.Factory {

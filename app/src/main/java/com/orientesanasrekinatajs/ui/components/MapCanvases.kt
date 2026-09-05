@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
@@ -49,6 +50,7 @@ import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.ui.theme.LocalAnimationsEnabled
 import kotlin.math.hypot
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sqrt
 import kotlin.math.cos
 import kotlin.math.sin
@@ -344,29 +346,29 @@ fun RouteRenderingCanvas(
         val pinnedLayers = orderedPinnedLayers.asReversed()
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
-            effectiveLayers.filter { it.isActive || isolatedRouteId == it.id }.forEach { layer ->
-                val centers = layer.points.map { viewport.base.toCanvas(it.center) }
-                val layerAlpha = if (isolatedRouteId == null || isolatedRouteId == layer.id) {
-                    1f
-                } else {
-                    otherLayerAlpha
-                }
-                drawRouteLines(
-                    centers,
-                    if (layer.isActive) progress.value else 1f,
-                    layer.color.copy(alpha = layer.color.alpha * layerAlpha),
-                )
+        }
+        effectiveLayers.filter { it.isActive || isolatedRouteId == it.id }.forEach { layer ->
+            val centers = layer.points.map { viewport.toCanvas(it.center) }
+            val layerAlpha = if (isolatedRouteId == null || isolatedRouteId == layer.id) {
+                1f
+            } else {
+                otherLayerAlpha
             }
-            pinnedLayers.filterNot { isolatedRouteId == it.id }.forEach { layer ->
-                val centers = layer.points.map { viewport.base.toCanvas(it.center) }
-                drawRouteLines(
-                    points = centers,
-                    progress = 1f,
-                    color = layer.color.copy(alpha = layer.color.alpha * 0.82f * otherLayerAlpha),
-                    dashIntervals = pinnedRouteDashIntervals(layer.patternIndex),
-                    strokeWidth = pinnedStrokeWidths.getValue(layer.id),
-                )
-            }
+            drawRouteLines(
+                centers,
+                if (layer.isActive) progress.value else 1f,
+                layer.color.copy(alpha = layer.color.alpha * layerAlpha),
+            )
+        }
+        pinnedLayers.filterNot { isolatedRouteId == it.id }.forEach { layer ->
+            val centers = layer.points.map { viewport.toCanvas(it.center) }
+            drawRouteLines(
+                points = centers,
+                progress = 1f,
+                color = layer.color.copy(alpha = layer.color.alpha * 0.82f * otherLayerAlpha),
+                dashIntervals = pinnedRouteDashIntervals(layer.patternIndex),
+                strokeWidth = pinnedStrokeWidths.getValue(layer.id),
+            )
         }
         val visitedIds = effectiveLayers.flatMap(RouteRenderLayer::points).mapTo(mutableSetOf()) { it.id }
         val isolatedVisitedIds = isolatedRouteId?.let { isolatedId ->
@@ -541,24 +543,24 @@ fun DistanceCalibrationCanvas(
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
-            val startCanvas = start?.let(viewport.base::toCanvas)
-            val endCanvas = end?.let(viewport.base::toCanvas)
-            if (startCanvas != null && endCanvas != null) {
-                drawLine(
-                    color = Color(0xFFFFC107),
-                    start = startCanvas,
-                    end = endCanvas,
-                    strokeWidth = 6f / zoom,
-                    cap = StrokeCap.Round,
-                )
-            }
-            listOfNotNull(startCanvas, endCanvas).forEach { point ->
-                val pointScale = sqrt(zoom)
-                drawCircle(Color.White, radius = 14f / pointScale, center = point)
-                drawCircle(Color(0xFFE91E63), radius = 10f / pointScale, center = point)
-            }
         }
-        // Keep the overview and point editor visually identical: green start, red finish,
+        val pointScale = controlMarkerScale(zoom)
+        val startCanvas = start?.let(viewport::toCanvas)
+        val endCanvas = end?.let(viewport::toCanvas)
+        if (startCanvas != null && endCanvas != null) {
+            drawLine(
+                color = Color(0xFFFFC107),
+                start = startCanvas,
+                end = endCanvas,
+                strokeWidth = 6f,
+                cap = StrokeCap.Round,
+            )
+        }
+        listOfNotNull(startCanvas, endCanvas).forEach { point ->
+            drawCircle(Color.White, radius = 14f * pointScale, center = point)
+            drawCircle(Color(0xFFE91E63), radius = 10f * pointScale, center = point)
+        }
+        // Keep the overview and point editor visually identical: green start, blue finish,
         // purple combined start/finish, pink controls, and orange review points.
         drawReferencePoints(controlPoints, viewport, zoom, useTypeColors = true)
         val selectionScale = controlMarkerScale(zoom)
@@ -806,7 +808,7 @@ private fun DrawScope.drawRouteLines(
     progress: Float,
     color: Color,
     dashIntervals: FloatArray? = null,
-    strokeWidth: Float = 7f,
+    strokeWidth: Float = DEFAULT_ROUTE_STROKE_WIDTH,
 ) {
     if (points.size < 2 || progress <= 0f) return
     val lengths = points.zipWithNext { first, second ->
@@ -839,15 +841,11 @@ private fun DrawScope.drawRouteLines(
 
     // Render the complete shadow first. Drawing shadow and color per segment lets the next
     // segment's shadow cover the previous segment's colored stroke at every route connection.
-    withTransform({
-        translate(ROUTE_SHADOW_OFFSET.x, ROUTE_SHADOW_OFFSET.y)
-    }) {
-        drawPath(
-            path = path,
-            color = Color.Black.copy(alpha = ROUTE_SHADOW_ALPHA * color.alpha),
-            style = shadowStyle,
-        )
-    }
+    drawPath(
+        path = path,
+        color = Color.Black.copy(alpha = ROUTE_SHADOW_ALPHA * color.alpha),
+        style = shadowStyle,
+    )
     drawPath(path = path, color = color, style = routeStyle)
 }
 
@@ -911,10 +909,11 @@ private fun DrawScope.drawReferencePoints(
     val outlinePaint = Paint(labelPaint).apply {
         color = android.graphics.Color.WHITE
         style = Paint.Style.STROKE
-        strokeWidth = 3f
+        strokeWidth = 3f * pointScale
     }
     points.forEach { point ->
-        val isMuted = point.id in mutedPointIds
+        val isMuted = point.id in mutedPointIds &&
+            point.type == ControlPointType.CONTROL && !point.needsReview
         val visibilityAlpha = pointAlpha(point).coerceIn(0f, 1f)
         labelPaint.alpha = ((if (isMuted) 125 else 255) * visibilityAlpha).toInt()
         outlinePaint.alpha = ((if (isMuted) 150 else 255) * visibilityAlpha).toInt()
@@ -933,13 +932,18 @@ private fun DrawScope.drawReferencePoints(
         } else if (useTypeColors) {
             when (point.type) {
                 ControlPointType.START -> Color(0xFF2E7D32)
-                ControlPointType.FINISH -> Color(0xFFC62828)
+                ControlPointType.FINISH -> Color(0xFF004DFF)
                 ControlPointType.START_FINISH -> Color(0xFF6A1B9A)
                 ControlPointType.CONTROL -> Color(0xFFE91E63)
             }
         } else {
             Color(0xFF007C91)
         }
+        drawCircle(
+            color = Color.Black.copy(alpha = CONTROL_SHADOW_ALPHA * visibilityAlpha),
+            radius = (CONTROL_POINT_OUTER_RADIUS_PX + CONTROL_SHADOW_WIDTH_PX) * pointScale,
+            center = center,
+        )
         drawCircle(
             color = Color.White.copy(
                 alpha = (if (isMuted) 0.65f else 1f) * visibilityAlpha,
@@ -959,7 +963,9 @@ private fun DrawScope.drawReferencePoints(
                 center = center,
                 style = Stroke(
                     width = 3f * pointScale,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 4f)),
+                    pathEffect = PathEffect.dashPathEffect(
+                        floatArrayOf(6f * pointScale, 4f * pointScale),
+                    ),
                 ),
             )
         }
@@ -969,6 +975,8 @@ private fun DrawScope.drawReferencePoints(
             ControlPointType.START_FINISH -> "S/F"
             ControlPointType.CONTROL -> if (point.needsReview) "?" else point.code.toString()
         }
+        labelPaint.color = markerColor.toArgb()
+        labelPaint.alpha = ((if (isMuted) 125 else 255) * visibilityAlpha).toInt()
         val labelX = center.x + CONTROL_POINT_OUTER_RADIUS_PX * pointScale
         val labelY = center.y - 10f * pointScale
         drawContext.canvas.nativeCanvas.drawText(label, labelX, labelY, outlinePaint)
@@ -1041,8 +1049,9 @@ private data class ViewportTransform(
     }
 }
 
-/** Matches the scale applied to map-space route strokes while keeping labels upright. */
-internal fun controlMarkerScale(zoom: Float): Float = zoom.coerceAtLeast(1f)
+/** Lets controls grow gently with zoom while capping their size at 1.5x. */
+internal fun controlMarkerScale(zoom: Float): Float =
+    zoom.coerceAtLeast(1f).pow(0.25f).coerceAtMost(MAX_CONTROL_MARKER_SCALE)
 
 @Composable
 private fun animatedFitQuarterTurns(rotationQuarterTurns: Int): Float {
@@ -1281,11 +1290,14 @@ internal fun updateBoundaryCorner(
 
 private const val CORNER_TOUCH_RADIUS_PX = 56f
 private const val CONTROL_POINT_OUTER_RADIUS_PX = 13f
+private const val DEFAULT_ROUTE_STROKE_WIDTH = 7f
+private const val MAX_CONTROL_MARKER_SCALE = 1.5f
+private const val CONTROL_SHADOW_WIDTH_PX = 2f
+private const val CONTROL_SHADOW_ALPHA = 0.30f
 private const val TAP_SLOP_PX = 12f
 private const val ROUTE_LONG_PRESS_RADIUS_PX = 32f
 private const val MIN_PINNED_ROUTE_STROKE_WIDTH = 3f
 private const val MAX_PINNED_ROUTE_STROKE_WIDTH = 7f
 private const val SINGLE_PINNED_ROUTE_STROKE_WIDTH = 4f
-private val ROUTE_SHADOW_OFFSET = Offset(1.5f, 1.5f)
-private const val ROUTE_SHADOW_ALPHA = 0.26f
-private const val ROUTE_SHADOW_WIDTH_EXTRA_PX = 2f
+private const val ROUTE_SHADOW_ALPHA = 0.32f
+private const val ROUTE_SHADOW_WIDTH_EXTRA_PX = 4f

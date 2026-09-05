@@ -61,6 +61,7 @@ object OpenCVUtils {
     private const val MIN_TRIANGLE_SIDE_RATIO = 0.68
     private const val MIN_HOUGH_RING_COVERAGE = 0.34
     private const val MAX_HOUGH_CENTER_INK_FRACTION = 0.22
+    private const val CONCENTRIC_GROUP_CENTER_TOLERANCE = 0.40f
 
     private val isOpenCvLoaded: Boolean by lazy { OpenCVLoader.initLocal() }
 
@@ -401,10 +402,6 @@ object OpenCVUtils {
                     val overlapsTriangle = nearbyContours.any {
                         it.shape == SymbolShape.TRIANGLE
                     }
-                    val concentricRejectedCircles = nearbyContours.count {
-                        it.shape == SymbolShape.CIRCLE &&
-                            it.ringEvidence == RingEvidence.MISMATCH
-                    }
                     if (overlapsAcceptedCircle || overlapsTriangle) {
                         return@mapNotNull null
                     }
@@ -421,7 +418,9 @@ object OpenCVUtils {
                         shape = SymbolShape.CIRCLE,
                         ringEvidence = RingEvidence.NONE,
                         shapeConfidence = coverage,
-                        ringMultiplicity = if (concentricRejectedCircles >= 1) 3 else 1,
+                        // A recovered circle is only one ring. Nearby rejected contours are too
+                        // noisy to promote it to a finish without concentric accepted rings.
+                        ringMultiplicity = 1,
                     )
                 }
             }.orEmpty()
@@ -436,7 +435,9 @@ object OpenCVUtils {
                 when {
                     candidate.ringEvidence == RingEvidence.MATCH -> candidate
                     candidate.ringEvidence == RingEvidence.MISMATCH && concentricInnerRing ->
-                        candidate.copy(ringMultiplicity = 3)
+                        // Treat hierarchy evidence as two rings, but still require another
+                        // accepted concentric contour before classifying a finish.
+                        candidate.copy(ringMultiplicity = 2)
                     requireRingHole || candidate.ringEvidence == RingEvidence.MISMATCH -> null
                     referenceRadius == null -> candidate
                     candidate.radius in
@@ -465,12 +466,12 @@ object OpenCVUtils {
                 val group = symbolGroups.firstOrNull { existing ->
                     val largest = existing.maxBy(SymbolCandidate::radius)
                     candidate.center.distanceTo(largest.center) <=
-                        max(3f, largest.radius + candidate.radius)
+                        max(3f, largest.radius * CONCENTRIC_GROUP_CENTER_TOLERANCE)
                 }
                 if (group == null) symbolGroups += mutableListOf(candidate) else group += candidate
             }
 
-            val detectedSymbols = symbolGroups.map { group ->
+            val classifiedSymbols = symbolGroups.map { group ->
                 val largest = group.maxBy(SymbolCandidate::radius)
                 val hasTriangle = group.any { it.shape == SymbolShape.TRIANGLE }
                 val circleCount = group.filter { it.shape == SymbolShape.CIRCLE }
@@ -481,7 +482,23 @@ object OpenCVUtils {
                     hasTriangle -> ControlPointType.START
                     else -> ControlPointType.CONTROL
                 }
-                DetectedControlSymbol(largest.center, largest.radius, type)
+                ClassifiedSymbol(
+                    symbol = DetectedControlSymbol(largest.center, largest.radius, type),
+                    ringCount = circleCount,
+                    confidence = group.maxOf(SymbolCandidate::shapeConfidence),
+                )
+            }
+            // A course has one finish. Keep the strongest concentric-ring candidate and demote
+            // other double-ring-like map details to ordinary controls.
+            val preferredFinish = classifiedSymbols
+                .filter { it.symbol.type == ControlPointType.FINISH }
+                .maxWithOrNull(compareBy<ClassifiedSymbol> { it.ringCount }.thenBy { it.confidence })
+            val detectedSymbols = classifiedSymbols.map { classified ->
+                if (classified.symbol.type == ControlPointType.FINISH && classified !== preferredFinish) {
+                    classified.symbol.copy(type = ControlPointType.CONTROL)
+                } else {
+                    classified.symbol
+                }
             }.sortedWith(compareBy({ it.center.y }, { it.center.x }))
 
             // A double circle can occasionally contribute a triangular approximation at one
@@ -904,6 +921,12 @@ object OpenCVUtils {
         val ringEvidence: RingEvidence,
         val shapeConfidence: Double,
         val ringMultiplicity: Int,
+    )
+
+    private data class ClassifiedSymbol(
+        val symbol: DetectedControlSymbol,
+        val ringCount: Int,
+        val confidence: Double,
     )
 
     private data class SamplePixel(

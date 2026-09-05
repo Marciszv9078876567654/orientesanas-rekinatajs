@@ -15,7 +15,12 @@ object OcrUtils {
     private const val MIN_INPUT_DIMENSION = 32
     private const val TARGET_TEXT_DIMENSION = 160
     private const val MAX_UPSCALE_FACTOR = 4f
-    private val controlNumberPattern = Regex("""\b\d{2,3}\b""")
+    private val controlNumberPattern = Regex(
+        """(?<![A-Za-z0-9])\d(?:\s?\d){1,2}(?![A-Za-z0-9])""",
+    )
+    private val ambiguousControlNumberPattern = Regex(
+        """(?<![A-Za-z0-9])[0-9BOSIl](?:\s?[0-9BOSIl]){1,2}(?![A-Za-z0-9])""",
+    )
     private val recognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
@@ -56,10 +61,25 @@ object OcrUtils {
         }
     }
 
-    internal fun controlNumbersIn(text: String): List<Int> =
-        controlNumberPattern.findAll(text).mapNotNull { match ->
-            match.value.toIntOrNull()
-        }.toList()
+    internal fun controlNumbersIn(text: String): List<Int> {
+        val exact = controlNumberPattern.findAll(text).mapNotNull { match ->
+            match.value.filter(Char::isDigit).toIntOrNull()
+        }
+        val normalized = ambiguousControlNumberPattern.findAll(text).mapNotNull { match ->
+            val compact = match.value.filterNot(Char::isWhitespace)
+            if (compact.all(Char::isDigit)) return@mapNotNull null
+            compact.map { character ->
+                when (character) {
+                    'B' -> '8'
+                    'O' -> '0'
+                    'S' -> '5'
+                    'I', 'l' -> '1'
+                    else -> character
+                }
+            }.joinToString("").toIntOrNull()
+        }
+        return (exact + normalized).distinct().toList()
+    }
 
     private suspend fun recognize(image: InputImage): Text =
         suspendCancellableCoroutine { continuation ->

@@ -18,7 +18,7 @@ import org.junit.runner.RunWith
 class Phase5ImageUtilsTest {
 
     @Test
-    fun cropRegionOfInterestUsesFiveRadiusDiameter() {
+    fun cropRegionOfInterestKeepsExtraMarginAroundControl() {
         val bitmap = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
 
         val cropped = ImageCropUtils.cropRegionOfInterest(
@@ -27,8 +27,8 @@ class Phase5ImageUtilsTest {
             radius = 20f,
         )
 
-        assertEquals(100, cropped.width)
-        assertEquals(100, cropped.height)
+        assertEquals(130, cropped.width)
+        assertEquals(130, cropped.height)
     }
 
     @Test
@@ -41,8 +41,8 @@ class Phase5ImageUtilsTest {
             radius = 20f,
         )
 
-        assertEquals(60, cropped.width)
-        assertEquals(60, cropped.height)
+        assertEquals(75, cropped.width)
+        assertEquals(75, cropped.height)
     }
 
     @Test
@@ -87,6 +87,16 @@ class Phase5ImageUtilsTest {
         val bitmap = textBitmap("7")
 
         assertNull(OcrUtils.extractControlNumber(bitmap))
+    }
+
+    @Test
+    fun controlNumberParserAcceptsDigitsSplitByOcrSpacing() {
+        assertEquals(listOf(83, 101), OcrUtils.controlNumbersIn("8 3   1 0 1"))
+    }
+
+    @Test
+    fun controlNumberParserCorrectsCommonOcrGlyphConfusions() {
+        assertEquals(listOf(83, 65, 101), OcrUtils.controlNumbersIn("B3 6S I0I"))
     }
 
     @Test

@@ -220,6 +220,39 @@ class Phase8ViewModelTest {
     }
 
     @Test
+    fun mapProcessing_rejectsRunawayCalibrationBeforeOcr() {
+        val sample = ColorCalibrationSample(140.0..160.0, 80.0..255.0, 60.0..255.0, 10f)
+        val excessiveSymbols = List(81) { index ->
+            DetectedControlSymbol(
+                center = Point2D((index % 9 * 10).toFloat(), (index / 9 * 10).toFloat()),
+                radius = 5f,
+                type = ControlPointType.CONTROL,
+            )
+        }
+        val engine = FakeProcessingEngine(
+            calibrationSample = sample,
+            calibratedSymbols = excessiveSymbols,
+        )
+        val viewModel = MapProcessingViewModel(engine, Dispatchers.Unconfined)
+        onMainThread { viewModel.processImage(Uri.parse("content://test/runaway-calibration")) }
+        val existingPoints = viewModel.uiState.value.controlPoints
+        onMainThread {
+            viewModel.startColorCalibration()
+            viewModel.applyColorCalibrationSample(Point2D(50f, 50f))
+        }
+        val callsBeforeConfirm = engine.calls.size
+
+        onMainThread { viewModel.confirmColorCalibration() }
+
+        val state = viewModel.uiState.value
+        assertEquals(existingPoints, state.controlPoints)
+        assertTrue(state.isCalibratingColor)
+        assertTrue(!state.isConfirmingColorCalibration)
+        assertTrue(state.error.orEmpty().contains("matched too much map detail"))
+        assertEquals(listOf("calibratedSymbols"), engine.calls.drop(callsBeforeConfirm))
+    }
+
+    @Test
     fun routing_buildsShortestRouteWithSegmentsAndTotals() {
         val viewModel = RoutingViewModel(Dispatchers.Unconfined)
         val points = routePoints()

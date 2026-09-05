@@ -114,6 +114,10 @@ internal fun EditMapScreen(
     var calibrationRecenterKey by rememberSaveable { mutableIntStateOf(0) }
     if (processingState.isCalibratingColor) {
         BackHandler(onBack = onCancelColorCalibration)
+        if (processingState.isConfirmingColorCalibration) {
+            ProcessingScreen(onBack = onCancelColorCalibration)
+            return
+        }
         Column(Modifier.fillMaxSize()) {
             ScreenTopBar(
                 title = stringResource(R.string.calibrate_control_color),

@@ -62,9 +62,9 @@ class MapRotationTest {
     }
 
     @Test
-    fun controlMarkersGrowAtTheSameRateAsMapSpaceLines() {
+    fun controlMarkersGrowGraduallyAndStopAtOneAndAHalfTimesSize() {
         assertEquals(1f, controlMarkerScale(1f), 0.001f)
-        assertEquals(3f, controlMarkerScale(3f), 0.001f)
-        assertEquals(12f, controlMarkerScale(12f), 0.001f)
+        assertEquals(1.414f, controlMarkerScale(4f), 0.001f)
+        assertEquals(1.5f, controlMarkerScale(12f), 0.001f)
     }
 }
