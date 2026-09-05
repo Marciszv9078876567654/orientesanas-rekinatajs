@@ -27,8 +27,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -805,29 +807,41 @@ private fun DrawScope.drawRouteLines(
     }
     val pathEffect = dashIntervals?.let { PathEffect.dashPathEffect(it) }
     var remaining = lengths.sum() * progress.coerceIn(0f, 1f)
-    points.zipWithNext().forEachIndexed { index, (start, end) ->
-        if (remaining <= 0f) return
+    val path = Path().apply { moveTo(points.first().x, points.first().y) }
+    for ((index, segment) in points.zipWithNext().withIndex()) {
+        if (remaining <= 0f) break
+        val (start, end) = segment
         val length = lengths[index]
         val fraction = if (length == 0f) 1f else (remaining / length).coerceAtMost(1f)
         val visibleEnd = start + (end - start) * fraction
-        drawLine(
-            color = Color.Black.copy(alpha = ROUTE_SHADOW_ALPHA * color.alpha),
-            start = start + ROUTE_SHADOW_OFFSET,
-            end = visibleEnd + ROUTE_SHADOW_OFFSET,
-            strokeWidth = strokeWidth + ROUTE_SHADOW_WIDTH_EXTRA_PX,
-            cap = StrokeCap.Round,
-            pathEffect = pathEffect,
-        )
-        drawLine(
-            color = color,
-            start = start,
-            end = visibleEnd,
-            strokeWidth = strokeWidth,
-            cap = StrokeCap.Round,
-            pathEffect = pathEffect,
-        )
+        path.lineTo(visibleEnd.x, visibleEnd.y)
         remaining -= length
     }
+    val shadowStyle = Stroke(
+        width = strokeWidth + ROUTE_SHADOW_WIDTH_EXTRA_PX,
+        cap = StrokeCap.Round,
+        join = StrokeJoin.Round,
+        pathEffect = pathEffect,
+    )
+    val routeStyle = Stroke(
+        width = strokeWidth,
+        cap = StrokeCap.Round,
+        join = StrokeJoin.Round,
+        pathEffect = pathEffect,
+    )
+
+    // Render the complete shadow first. Drawing shadow and color per segment lets the next
+    // segment's shadow cover the previous segment's colored stroke at every route connection.
+    withTransform({
+        translate(ROUTE_SHADOW_OFFSET.x, ROUTE_SHADOW_OFFSET.y)
+    }) {
+        drawPath(
+            path = path,
+            color = Color.Black.copy(alpha = ROUTE_SHADOW_ALPHA * color.alpha),
+            style = shadowStyle,
+        )
+    }
+    drawPath(path = path, color = color, style = routeStyle)
 }
 
 private fun routeAtPosition(
