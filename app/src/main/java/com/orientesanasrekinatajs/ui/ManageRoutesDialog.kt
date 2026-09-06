@@ -275,7 +275,7 @@ internal fun ManageRoutesDialog(
                                         onClick = {
                                             val duplicate = managedRoute.copy(id = java.util.UUID.randomUUID().toString())
                                             managedRoutes = managedRoutes.toMutableList().also { it.add(index + 1, duplicate) }
-                                            val nextColor = ((managedMetadata.values.maxOfOrNull(RouteMetadata::colorIndex) ?: -1) + 1) % 10
+                                            val nextColor = com.orientesanasrekinatajs.domain.model.nextRouteColorIndex(managedMetadata.values)
                                             managedMetadata = managedMetadata + (duplicate.id to metadata.copy(
                                                 name = duplicateName.take(60), isStarred = false,
                                                 colorIndex = nextColor, isDisplayed = false,

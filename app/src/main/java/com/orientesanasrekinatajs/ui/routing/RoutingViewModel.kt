@@ -853,7 +853,7 @@ class RoutingViewModel internal constructor(
     private fun defaultRouteName(index: Int): String = if (index <= 0) "Route" else "Route (${index + 1})"
 
     private fun nextColorIndex(metadata: Map<String, RouteMetadata>): Int =
-        ((metadata.values.maxOfOrNull(RouteMetadata::colorIndex) ?: -1) + 1) % ROUTE_COLOR_COUNT
+        com.orientesanasrekinatajs.domain.model.nextRouteColorIndex(metadata.values)
 
     private fun publishRoutes(
         routes: List<OptimizedRoute>,
@@ -943,7 +943,6 @@ class RoutingViewModel internal constructor(
         const val MAX_ALTERNATIVE_TARGET_ATTEMPTS = 500
         const val MAX_RESTRICTION_REPAIR_PASSES = 64
         const val DISTANCE_EPSILON = 0.0001f
-        const val ROUTE_COLOR_COUNT = 10
         val CONNECTION_RESTRICTION_TYPES = setOf(
             RouteRestrictionType.BLACKLIST_CONNECTION,
             RouteRestrictionType.MANDATORY_CONNECTION,

@@ -176,7 +176,7 @@
     <string name="add_point">Add point</string>
     <string name="done_editing_points">Done editing points</string>
     <string name="save_points">Save points</string>
-    <string name="point_edit_help">Drag a point to change its location. Tap a point to edit its type or code. Use the add button to create a new point.</string>
+    <string name="point_edit_help">Hold a point briefly, then drag to change its location. Tap a point to edit its type or code. Use the add button to create a new point.</string>
     <string name="edit_point">Edit point</string>
     <string name="control_code">Control code</string>
     <string name="save">Save</string>
@@ -241,7 +241,7 @@
     <string name="map_export_failed">The map could not be exported.</string>
     <string name="map_import_failed">The selected file is not a valid exported map.</string>
     <string name="calibrate_control_color">Calibrate from a known control</string>
-    <string name="calibrate_control_color_help">Tap the centers of one or more clear control circles. Drag an orange marker to adjust it. Full point detection starts only after Confirm; Cancel keeps the current points.</string>
+    <string name="calibrate_control_color_help">Tap the centers of one or more clear control circles. Hold an orange marker briefly, then drag to adjust it. Full point detection starts only after Confirm; Cancel keeps the current points.</string>
     <string name="calibrate_control_color_warning_title">Replace detected controls?</string>
     <string name="calibrate_control_color_warning">Confirming a new calibration can replace all existing controls and will clear the distance calibration line. Continue?</string>
     <string name="calibrate_control_color_failed">Calibration failed</string>

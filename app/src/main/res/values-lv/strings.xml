@@ -161,7 +161,7 @@
     <string name="add_point">Pievienot punktu</string>
     <string name="done_editing_points">Pabeigt punktu labošanu</string>
     <string name="save_points">Saglabāt punktus</string>
-    <string name="point_edit_help">Velciet punktu, lai mainītu tā atrašanās vietu. Pieskarieties punktam, lai labotu tā veidu vai kodu. Izmantojiet pievienošanas pogu, lai izveidotu jaunu punktu.</string>
+    <string name="point_edit_help">Īsi turiet punktu, pēc tam velciet, lai mainītu tā atrašanās vietu. Pieskarieties punktam, lai labotu tā veidu vai kodu. Izmantojiet pievienošanas pogu, lai izveidotu jaunu punktu.</string>
     <string name="edit_point">Labot punktu</string>
     <string name="control_code">Kontrolpunkta kods</string>
     <string name="save">Saglabāt</string>
@@ -228,7 +228,7 @@
     <string name="map_export_failed">Karti neizdevās eksportēt.</string>
     <string name="map_import_failed">Izvēlētais fails nav derīga eksportēta karte.</string>
     <string name="calibrate_control_color">Kalibrēt pēc zināma kontrolpunkta</string>
-    <string name="calibrate_control_color_help">Pieskarieties viena vai vairāku skaidri redzamu kontrolpunktu apļu centriem. Velciet oranžo atzīmi, lai koriģētu tās vietu. Pilna punktu noteikšana sāksies tikai pēc “Apstiprināt” izvēles; “Atcelt” saglabās pašreizējos punktus.</string>
+    <string name="calibrate_control_color_help">Pieskarieties viena vai vairāku skaidri redzamu kontrolpunktu apļu centriem. Īsi turiet oranžo atzīmi, pēc tam velciet, lai koriģētu tās vietu. Pilna punktu noteikšana sāksies tikai pēc “Apstiprināt” izvēles; “Atcelt” saglabās pašreizējos punktus.</string>
     <string name="calibrate_control_color_warning_title">Aizstāt atrastos kontrolpunktus?</string>
     <string name="calibrate_control_color_warning">Jaunās kalibrēšanas apstiprināšana var aizstāt visus esošos kontrolpunktus un notīrīs attāluma kalibrēšanas līniju. Vai turpināt?</string>
     <string name="calibrate_control_color_failed">Kalibrēšana neizdevās</string>

@@ -174,16 +174,23 @@ fun InteractiveCornerCanvas(
         )
         withViewport(viewport) {
             drawFittedImage(image, viewport.base)
-            val corners = boundary.corners().map(viewport.base::toCanvas)
-            corners.forEachIndexed { index, corner ->
-                val next = corners[(index + 1) % corners.size]
-                drawLine(lineColor, corner, next, strokeWidth = 4f / zoom, cap = StrokeCap.Round)
-            }
-            corners.forEach { corner ->
-                val pointScale = sqrt(zoom)
-                drawCircle(Color.White, radius = 15f / pointScale, center = corner)
-                drawCircle(handleColor, radius = 11f / pointScale, center = corner)
-            }
+        }
+        val corners = boundary.corners().map(viewport::toCanvas)
+        val pointScale = controlMarkerScale(zoom)
+        val borderPath = Path().apply {
+            moveTo(corners.first().x, corners.first().y)
+            corners.drop(1).forEach { lineTo(it.x, it.y) }
+            close()
+        }
+        drawMapLinePath(borderPath, lineColor, DEFAULT_ROUTE_STROKE_WIDTH, pointScale)
+        corners.forEach { corner ->
+            drawCircle(
+                Color.Black.copy(alpha = CONTROL_SHADOW_ALPHA),
+                radius = (CONTROL_POINT_OUTER_RADIUS_PX + CONTROL_SHADOW_WIDTH_PX) * pointScale,
+                center = corner,
+            )
+            drawCircle(Color.White, radius = CONTROL_POINT_OUTER_RADIUS_PX * pointScale, center = corner)
+            drawCircle(handleColor, radius = 9f * pointScale, center = corner)
         }
     }
 }
@@ -623,7 +630,7 @@ fun ControlColorCalibrationCanvas(
     )
 }
 
-/** Zoomable control editor: drag a marker to move it and tap it to edit its metadata. */
+/** Zoomable control editor: hold a marker to move it, or tap to edit its metadata. */
 @Composable
 fun InteractiveControlPointCanvas(
     bitmap: Bitmap,
@@ -695,6 +702,7 @@ fun InteractiveControlPointCanvas(
             .pointerInput(bitmap.width, bitmap.height, rotationQuarterTurns) {
                 awaitEachGesture {
                     val down = awaitFirstDown()
+                    val dragHold = MarkerDragHold(down.uptimeMillis, down.position, viewConfiguration.touchSlop)
                     val initialViewport = viewportTransform(
                         size, bitmap.width, bitmap.height, rotationQuarterTurns, zoom, pan,
                         rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
@@ -739,14 +747,14 @@ fun InteractiveControlPointCanvas(
                                     val delta = change.position - change.previousPosition
                                     moved += delta.getDistance()
                                     val selected = latestPoints.firstOrNull { it.id == selectedId }
-                                    if (selected != null) {
+                                    if (selected != null && dragHold.update(change.uptimeMillis, change.position)) {
                                         val viewport = viewportTransform(
                                             size, bitmap.width, bitmap.height,
                                             rotationQuarterTurns, zoom, pan,
                                             rotationDegrees = rotationQuarterTurns * 90f + latestRotationOffset,
                                         )
                                         latestOnPointMoved(selected.copy(center = viewport.toImage(change.position)))
-                                    } else {
+                                    } else if (selected == null || dragHold.cancelled) {
                                         pan += delta
                                     }
                                     change.consume()
@@ -755,7 +763,7 @@ fun InteractiveControlPointCanvas(
                         }
                         if (event.changes.all { !it.pressed }) break
                     }
-                    if (!usedMultiTouch && moved <= TAP_SLOP_PX) {
+                    if (!usedMultiTouch && !dragHold.activated && moved <= TAP_SLOP_PX) {
                         val selected = latestPoints.firstOrNull { it.id == selectedId }
                         if (selected != null) {
                             latestOnPointSelected(selected)
@@ -843,6 +851,17 @@ private fun DrawScope.drawRouteLines(
         path.lineTo(visibleEnd.x, visibleEnd.y)
         remaining -= length
     }
+    drawMapLinePath(path, color, strokeWidth, lineScale, pathEffect)
+}
+
+/** Shared border/route styling, drawn in screen coordinates so zoom is applied once. */
+private fun DrawScope.drawMapLinePath(
+    path: Path,
+    color: Color,
+    strokeWidth: Float,
+    lineScale: Float,
+    pathEffect: PathEffect? = null,
+) {
     val shadowStyle = Stroke(
         width = (strokeWidth + ROUTE_SHADOW_WIDTH_EXTRA_PX) * lineScale,
         cap = StrokeCap.Round,

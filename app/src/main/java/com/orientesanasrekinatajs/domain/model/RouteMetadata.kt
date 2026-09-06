@@ -10,3 +10,7 @@ data class RouteMetadata(
     val isAlternative: Boolean = false,
     val parentRouteId: String? = null,
 )
+
+/** Keep the sequence increasing; only rendering wraps it into the available palette. */
+fun nextRouteColorIndex(metadata: Collection<RouteMetadata>): Int =
+    (metadata.maxOfOrNull(RouteMetadata::colorIndex) ?: -1) + 1

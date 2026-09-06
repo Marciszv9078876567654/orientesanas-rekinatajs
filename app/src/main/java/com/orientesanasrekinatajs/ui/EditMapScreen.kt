@@ -766,7 +766,7 @@ internal fun ControlPointEditorDialog(
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
                 TextButton(
                     enabled = type != ControlPointType.CONTROL ||
-                        (codeText.toIntOrNull()?.let { it >= 31 } == true),
+                        isValidControlCode(codeText),
                     onClick = {
                         val code = if (type == ControlPointType.CONTROL) codeText.toIntOrNull() ?: 0 else 0
                         onSave(
