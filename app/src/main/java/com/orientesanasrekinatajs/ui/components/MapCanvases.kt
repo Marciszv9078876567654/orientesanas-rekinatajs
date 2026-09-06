@@ -50,7 +50,6 @@ import com.orientesanasrekinatajs.domain.model.Point2D
 import com.orientesanasrekinatajs.ui.theme.LocalAnimationsEnabled
 import kotlin.math.hypot
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.sqrt
 import kotlin.math.cos
 import kotlin.math.sin
@@ -549,16 +548,28 @@ fun DistanceCalibrationCanvas(
         val endCanvas = end?.let(viewport::toCanvas)
         if (startCanvas != null && endCanvas != null) {
             drawLine(
-                color = Color(0xFFFFC107),
+                color = Color.Black.copy(alpha = 0.55f),
                 start = startCanvas,
                 end = endCanvas,
-                strokeWidth = 6f,
+                strokeWidth = MEASUREMENT_LINE_OUTLINE_WIDTH_PX,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = MEASUREMENT_COLOR,
+                start = startCanvas,
+                end = endCanvas,
+                strokeWidth = MEASUREMENT_LINE_WIDTH_PX,
                 cap = StrokeCap.Round,
             )
         }
         listOfNotNull(startCanvas, endCanvas).forEach { point ->
+            drawCircle(
+                Color.Black.copy(alpha = 0.45f),
+                radius = 16f * pointScale,
+                center = point,
+            )
             drawCircle(Color.White, radius = 14f * pointScale, center = point)
-            drawCircle(Color(0xFFE91E63), radius = 10f * pointScale, center = point)
+            drawCircle(MEASUREMENT_COLOR, radius = 10f * pointScale, center = point)
         }
         // Keep the overview and point editor visually identical: green start, blue finish,
         // purple combined start/finish, pink controls, and orange review points.
@@ -1049,9 +1060,9 @@ private data class ViewportTransform(
     }
 }
 
-/** Lets controls grow gently with zoom while capping their size at 1.5x. */
+/** Makes control growth obvious by 2x zoom while capping marker size at 1.5x. */
 internal fun controlMarkerScale(zoom: Float): Float =
-    zoom.coerceAtLeast(1f).pow(0.25f).coerceAtMost(MAX_CONTROL_MARKER_SCALE)
+    (1f + (zoom.coerceAtLeast(1f) - 1f) * 0.5f).coerceAtMost(MAX_CONTROL_MARKER_SCALE)
 
 @Composable
 private fun animatedFitQuarterTurns(rotationQuarterTurns: Int): Float {
@@ -1294,6 +1305,9 @@ private const val DEFAULT_ROUTE_STROKE_WIDTH = 7f
 private const val MAX_CONTROL_MARKER_SCALE = 1.5f
 private const val CONTROL_SHADOW_WIDTH_PX = 2f
 private const val CONTROL_SHADOW_ALPHA = 0.30f
+private val MEASUREMENT_COLOR = Color(0xFF00CFE8)
+private const val MEASUREMENT_LINE_WIDTH_PX = 6f
+private const val MEASUREMENT_LINE_OUTLINE_WIDTH_PX = 10f
 private const val TAP_SLOP_PX = 12f
 private const val ROUTE_LONG_PRESS_RADIUS_PX = 32f
 private const val MIN_PINNED_ROUTE_STROKE_WIDTH = 3f

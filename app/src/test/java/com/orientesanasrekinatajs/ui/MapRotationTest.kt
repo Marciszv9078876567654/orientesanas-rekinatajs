@@ -64,7 +64,9 @@ class MapRotationTest {
     @Test
     fun controlMarkersGrowGraduallyAndStopAtOneAndAHalfTimesSize() {
         assertEquals(1f, controlMarkerScale(1f), 0.001f)
-        assertEquals(1.414f, controlMarkerScale(4f), 0.001f)
+        assertEquals(1.25f, controlMarkerScale(1.5f), 0.001f)
+        assertEquals(1.5f, controlMarkerScale(2f), 0.001f)
+        assertEquals(1.5f, controlMarkerScale(4f), 0.001f)
         assertEquals(1.5f, controlMarkerScale(12f), 0.001f)
     }
 }
