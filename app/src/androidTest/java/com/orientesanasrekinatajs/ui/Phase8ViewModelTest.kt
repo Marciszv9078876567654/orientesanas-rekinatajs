@@ -182,7 +182,7 @@ class Phase8ViewModelTest {
             listOf(Point2D(75f, 20f), Point2D(25f, 75f)),
             previewState.calibrationReferencePoints,
         )
-        assertEquals(callsBeforeCalibration + listOf("sample", "sample"), engine.calls)
+        assertEquals(callsBeforeCalibration, engine.calls)
 
         onMainThread { viewModel.confirmColorCalibration() }
 
@@ -207,16 +207,43 @@ class Phase8ViewModelTest {
         }
 
         assertEquals(listOf(Point2D(30f, 35f)), viewModel.uiState.value.calibrationReferencePoints)
-        assertTrue(viewModel.uiState.value.isSamplingColor)
-        Thread.sleep(250)
-        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         assertTrue(!viewModel.uiState.value.isSamplingColor)
-        assertEquals(2, engine.calls.count { it == "sample" })
+        assertEquals(0, engine.calls.count { it == "sample" })
 
         onMainThread { viewModel.clearColorCalibrationReferences() }
 
         assertTrue(viewModel.uiState.value.calibrationReferencePoints.isEmpty())
-        assertEquals(null, viewModel.uiState.value.pendingColorCalibration)
+    }
+
+    @Test
+    fun mapProcessing_keepsInvalidReferencesAndOnlyReportsFailureOnConfirm() {
+        val viewModel = MapProcessingViewModel(FakeProcessingEngine(), Dispatchers.Unconfined)
+        onMainThread {
+            viewModel.processImage(Uri.parse("content://test/invalid-reference"))
+            viewModel.startColorCalibration()
+            viewModel.applyColorCalibrationSample(Point2D(20f, 20f))
+            viewModel.moveColorCalibrationReference(0, Point2D(21f, 22f))
+        }
+        assertEquals(null, viewModel.uiState.value.error)
+        assertEquals(listOf(Point2D(21f, 22f)), viewModel.uiState.value.calibrationReferencePoints)
+        val points = viewModel.uiState.value.controlPoints
+        onMainThread { viewModel.confirmColorCalibration() }
+        assertTrue(viewModel.uiState.value.error != null)
+        assertEquals(points, viewModel.uiState.value.controlPoints)
+        assertEquals(1, viewModel.uiState.value.calibrationReferencePoints.size)
+    }
+
+    @Test
+    fun mapProcessing_cancelEditRestoresUnsavedControlPoints() {
+        val viewModel = MapProcessingViewModel(FakeProcessingEngine(), Dispatchers.Unconfined)
+        onMainThread { viewModel.processImage(Uri.parse("content://test/edit-snapshot")) }
+        val snapshot = viewModel.uiState.value
+        onMainThread {
+            viewModel.clearControlPoints()
+            viewModel.startColorCalibration()
+            viewModel.restoreEditState(snapshot)
+        }
+        assertEquals(snapshot, viewModel.uiState.value)
     }
 
     @Test
@@ -249,7 +276,7 @@ class Phase8ViewModelTest {
         assertTrue(state.isCalibratingColor)
         assertTrue(!state.isConfirmingColorCalibration)
         assertTrue(state.error.orEmpty().contains("matched too much map detail"))
-        assertEquals(listOf("calibratedSymbols"), engine.calls.drop(callsBeforeConfirm))
+        assertEquals(listOf("sample", "sample", "calibratedSymbols"), engine.calls.drop(callsBeforeConfirm))
     }
 
     @Test

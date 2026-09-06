@@ -93,6 +93,7 @@ fun OrienteeringApp(
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
     onDismissReviewSummary: () -> Unit,
+    onRestoreMapState: (MapProcessingUiState) -> Unit,
     onInvalidateRoute: () -> Unit,
     onCalculateRoute: (
         pixelsPerMeter: Float,
@@ -235,6 +236,7 @@ fun OrienteeringApp(
                     onCancelColorCalibration = onCancelColorCalibration,
                     onDismissProcessingError = onDismissProcessingError,
                     onDismissReviewSummary = onDismissReviewSummary,
+                    onRestoreMapState = onRestoreMapState,
                     onInvalidateRoute = onInvalidateRoute,
                     onCalculateRoute = onCalculateRoute,
                     onGenerateAlternativeRoutes = onGenerateAlternativeRoutes,
@@ -245,7 +247,6 @@ fun OrienteeringApp(
                     onSaveMap = onSaveMap,
                     onRenameSavedMap = onRenameSavedMap,
                     onDeleteSavedMap = onDeleteSavedMap,
-                    onReloadSavedMap = onLoadSavedMap,
                     isSavingMap = savedMapsState.isSaving,
                     isTransferringMap = mapTransferState.isWorking,
                     rotation = mapRotation,

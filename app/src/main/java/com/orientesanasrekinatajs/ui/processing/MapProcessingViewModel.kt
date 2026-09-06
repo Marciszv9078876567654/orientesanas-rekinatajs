@@ -22,7 +22,6 @@ import com.orientesanasrekinatajs.imageprocessing.OpenCVUtils
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -51,9 +50,7 @@ data class MapProcessingUiState(
     val manualBoundaryRequired: Boolean = false,
     val isCalibratingColor: Boolean = false,
     val colorCalibration: ColorCalibrationSample? = null,
-    val pendingColorCalibration: ColorCalibrationSample? = null,
     val calibrationReferencePoints: List<Point2D> = emptyList(),
-    val calibrationReferenceSamples: List<ColorCalibrationSample> = emptyList(),
     val isSamplingColor: Boolean = false,
     val isConfirmingColorCalibration: Boolean = false,
     val reviewSummaryDismissed: Boolean = false,
@@ -232,9 +229,7 @@ class MapProcessingViewModel internal constructor(
         if (_uiState.value.rectifiedBitmap == null) return
         _uiState.value = _uiState.value.copy(
             isCalibratingColor = true,
-            pendingColorCalibration = null,
             calibrationReferencePoints = emptyList(),
-            calibrationReferenceSamples = emptyList(),
             isSamplingColor = false,
             isConfirmingColorCalibration = false,
             error = null,
@@ -245,9 +240,7 @@ class MapProcessingViewModel internal constructor(
         processingJob?.cancel()
         _uiState.value = _uiState.value.copy(
             isCalibratingColor = false,
-            pendingColorCalibration = null,
             calibrationReferencePoints = emptyList(),
-            calibrationReferenceSamples = emptyList(),
             isSamplingColor = false,
             isConfirmingColorCalibration = false,
             error = null,
@@ -257,7 +250,7 @@ class MapProcessingViewModel internal constructor(
     /** Detects and applies the replacement point set after reference selection is confirmed. */
     fun confirmColorCalibration() {
         val current = _uiState.value
-        val sample = current.pendingColorCalibration ?: return
+        if (current.calibrationReferencePoints.isEmpty()) return
         val rectified = current.rectifiedBitmap ?: return
         processingJob?.cancel()
         processingJob = viewModelScope.launch {
@@ -268,6 +261,31 @@ class MapProcessingViewModel internal constructor(
             )
             runCatching {
                 withContext(workerDispatcher) {
+                    val references = current.calibrationReferencePoints
+                    val samples = references.mapNotNull { engine.sampleControlPointColor(rectified, it) }
+                    val radius = samples.map { it.estimatedRadius }.sorted().let {
+                        if (it.isEmpty()) 24f else it[it.size / 2]
+                    }
+                    // Nearby references may describe one object. Give each object one vote.
+                    val groups = mutableListOf<MutableList<Point2D>>()
+                    references.forEach { reference ->
+                        val group = groups.firstOrNull { group ->
+                            group.all { it.distanceTo(reference) <= radius * 2f }
+                        }
+                        if (group == null) groups += mutableListOf(reference) else group += reference
+                    }
+                    val sharedSamples = groups.mapNotNull { group ->
+                        val center = Point2D(group.map { it.x }.average().toFloat(),
+                            group.map { it.y }.average().toFloat())
+                        engine.sampleControlPointColor(rectified, center)
+                            ?: combineCalibrationSamples(group.mapNotNull {
+                                engine.sampleControlPointColor(rectified, it)
+                            })
+                    }
+                    val sample = combineCalibrationSamples(sharedSamples)
+                        ?: throw MapProcessingException(
+                            "Couldn't identify control ink from these references. Adjust them and confirm again.",
+                        )
                     val symbols = engine.detectControlSymbols(rectified, sample)
                     if (symbols.size > MAX_CALIBRATED_SYMBOLS) {
                         _uiState.value = current.copy(
@@ -292,9 +310,7 @@ class MapProcessingViewModel internal constructor(
                     _uiState.value = current.copy(
                         controlPoints = detected,
                         colorCalibration = sample,
-                        pendingColorCalibration = null,
                         calibrationReferencePoints = emptyList(),
-                        calibrationReferenceSamples = emptyList(),
                         isCalibratingColor = false,
                         isSamplingColor = false,
                         isConfirmingColorCalibration = false,
@@ -324,122 +340,31 @@ class MapProcessingViewModel internal constructor(
         _uiState.value = _uiState.value.copy(reviewSummaryDismissed = true)
     }
 
-    /** Samples one reference circle without running full-map detection or OCR. */
+    /** References form a shared draft; validate the whole selection on confirm. */
     fun applyColorCalibrationSample(tapPoint: Point2D) {
         val current = _uiState.value
-        val rectified = current.rectifiedBitmap ?: return
-        processingJob?.cancel()
-        processingJob = viewModelScope.launch {
-            _uiState.value = current.copy(isSamplingColor = true, error = null)
-            runCatching {
-                withContext(workerDispatcher) {
-                    val sample = engine.sampleControlPointColor(rectified, tapPoint)
-                    if (sample == null) {
-                        _uiState.value = current.copy(
-                            isCalibratingColor = true,
-                            isSamplingColor = false,
-                            error = "Couldn't identify a control symbol there. Try tapping more precisely.",
-                        )
-                        return@withContext
-                    }
-                    val existingReferences = current.calibrationReferencePoints
-                    val isDuplicate = existingReferences.any { reference ->
-                        reference.distanceTo(tapPoint) <= sample.estimatedRadius * 0.75f
-                    }
-                    val references = if (isDuplicate) {
-                        existingReferences
-                    } else {
-                        existingReferences + tapPoint
-                    }
-                    val samples = if (isDuplicate) {
-                        current.calibrationReferenceSamples
-                    } else {
-                        current.calibrationReferenceSamples + sample
-                    }
-                    _uiState.value = current.copy(
-                        pendingColorCalibration = combineCalibrationSamples(samples),
-                        calibrationReferencePoints = references,
-                        calibrationReferenceSamples = samples,
-                        isCalibratingColor = true,
-                        isSamplingColor = false,
-                        error = null,
-                    )
-                }
-            }.onFailure { throwable ->
-                if (throwable !is kotlinx.coroutines.CancellationException) {
-                    _uiState.value = current.copy(
-                        stage = MapProcessingStage.COMPLETE,
-                        isCalibratingColor = true,
-                        isSamplingColor = false,
-                        error = throwable.message ?: "Control color calibration failed",
-                    )
-                }
-            }
-        }
-    }
-
-    /** Moves a selected reference immediately and re-samples after drag events settle. */
-    fun moveColorCalibrationReference(index: Int, center: Point2D) {
-        val current = _uiState.value
-        if (index !in current.calibrationReferencePoints.indices) return
-        val movedReferences = current.calibrationReferencePoints.toMutableList().apply {
-            this[index] = center
-        }
+        if (current.rectifiedBitmap == null || current.isConfirmingColorCalibration) return
         _uiState.value = current.copy(
-            calibrationReferencePoints = movedReferences,
-            isSamplingColor = true,
+            calibrationReferencePoints = current.calibrationReferencePoints + tapPoint,
             error = null,
         )
-        val rectified = current.rectifiedBitmap ?: return
-        processingJob?.cancel()
-        processingJob = viewModelScope.launch {
-            delay(180)
-            runCatching {
-                withContext(workerDispatcher) {
-                    val sample = engine.sampleControlPointColor(rectified, center) ?: run {
-                        val latest = _uiState.value
-                        val references = latest.calibrationReferencePoints
-                            .filterIndexed { sampleIndex, _ -> sampleIndex != index }
-                        val samples = latest.calibrationReferenceSamples
-                            .filterIndexed { sampleIndex, _ -> sampleIndex != index }
-                        _uiState.value = latest.copy(
-                            pendingColorCalibration = combineCalibrationSamples(samples),
-                            calibrationReferencePoints = references,
-                            calibrationReferenceSamples = samples,
-                            isSamplingColor = false,
-                            error = "Couldn't identify a control symbol there. Move it closer to the circle center.",
-                        )
-                        return@withContext
-                    }
-                    val latest = _uiState.value
-                    if (index !in latest.calibrationReferenceSamples.indices) return@withContext
-                    val samples = latest.calibrationReferenceSamples.toMutableList().apply {
-                        this[index] = sample
-                    }
-                    _uiState.value = latest.copy(
-                        pendingColorCalibration = combineCalibrationSamples(samples),
-                        calibrationReferenceSamples = samples,
-                        isSamplingColor = false,
-                        error = null,
-                    )
-                }
-            }.onFailure { throwable ->
-                if (throwable !is kotlinx.coroutines.CancellationException) {
-                    _uiState.value = _uiState.value.copy(
-                        isSamplingColor = false,
-                        error = throwable.message ?: "Control color calibration failed",
-                    )
-                }
-            }
-        }
+    }
+
+    fun moveColorCalibrationReference(index: Int, center: Point2D) {
+        val current = _uiState.value
+        if (index !in current.calibrationReferencePoints.indices || current.isConfirmingColorCalibration) return
+        _uiState.value = current.copy(
+            calibrationReferencePoints = current.calibrationReferencePoints.toMutableList().apply {
+                this[index] = center
+            },
+            error = null,
+        )
     }
 
     fun clearColorCalibrationReferences() {
         processingJob?.cancel()
         _uiState.value = _uiState.value.copy(
-            pendingColorCalibration = null,
             calibrationReferencePoints = emptyList(),
-            calibrationReferenceSamples = emptyList(),
             isSamplingColor = false,
             error = null,
         )
@@ -497,6 +422,11 @@ class MapProcessingViewModel internal constructor(
     fun reset() {
         processingJob?.cancel()
         _uiState.value = MapProcessingUiState()
+    }
+
+    fun restoreEditState(snapshot: MapProcessingUiState) {
+        processingJob?.cancel()
+        _uiState.value = snapshot
     }
 
     private suspend fun processBoundary(
@@ -706,7 +636,8 @@ private class AndroidMapProcessingEngine(context: Context) : MapProcessingEngine
     ): Bitmap = OpenCVUtils.isolateInkColor(bitmap, colorCalibration)
 
     override fun cropRegion(bitmap: Bitmap, symbol: DetectedControlSymbol): Bitmap =
-        ImageCropUtils.cropRegionOfInterest(bitmap, symbol.center, symbol.radius.coerceAtLeast(4f))
+        ImageCropUtils.cropRegionOfInterest(bitmap, symbol.center, symbol.radius.coerceAtLeast(4f),
+            eraseSymbol = true)
 
     override suspend fun extractControlNumber(bitmap: Bitmap): Int? =
         OcrUtils.extractControlNumber(bitmap)

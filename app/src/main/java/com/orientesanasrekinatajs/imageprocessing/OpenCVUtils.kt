@@ -35,7 +35,7 @@ object OpenCVUtils {
     // Printed course ink is commonly much paler than its digital source, especially in photos.
     private const val DEFAULT_HUE_MIN = 125.0
     private const val DEFAULT_HUE_MAX = 175.0
-    private const val DEFAULT_SATURATION_MIN = 45.0
+    private const val DEFAULT_SATURATION_MIN = 30.0
     private const val DEFAULT_VALUE_MIN = 40.0
     private const val HUE_TOLERANCE = 7.5
     private const val SATURATION_TOLERANCE_DOWN = 55.0
@@ -57,7 +57,7 @@ object OpenCVUtils {
     private const val HOUGH_RADIUS_MIN_FACTOR = 0.82
     private const val HOUGH_RADIUS_MAX_FACTOR = 1.20
     private const val TRIANGLE_RADIUS_MIN_FACTOR = 0.75
-    private const val TRIANGLE_RADIUS_MAX_FACTOR = 1.45
+    private const val TRIANGLE_RADIUS_MAX_FACTOR = 1.80
     private const val MIN_TRIANGLE_SIDE_RATIO = 0.68
     private const val MIN_HOUGH_RING_COVERAGE = 0.34
     private const val MAX_HOUGH_CENTER_INK_FRACTION = 0.22
@@ -322,12 +322,10 @@ object OpenCVUtils {
         val rgb = Mat()
         val hsv = Mat()
         val mask = Mat()
-        val closedMask = Mat()
         val blurredMask = Mat()
         val houghCircles = Mat()
         val hierarchy = Mat()
         val contours = mutableListOf<MatOfPoint>()
-        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(3.0, 3.0))
 
         return try {
             Utils.bitmapToMat(bitmap, rgba)
@@ -340,9 +338,10 @@ object OpenCVUtils {
                 upperColor,
                 mask,
             )
-            Imgproc.morphologyEx(mask, closedMask, Imgproc.MORPH_CLOSE, kernel)
+            // Preserve the narrow white gap between finish rings. Closing before contour
+            // extraction merges those rings and can also connect a control to its number.
             Imgproc.findContours(
-                closedMask,
+                mask,
                 contours,
                 hierarchy,
                 Imgproc.RETR_TREE,
@@ -357,7 +356,19 @@ object OpenCVUtils {
             val allCandidates = contours.mapIndexedNotNull { index, contour ->
                 val childIndex = hierarchyEntry(hierarchy, index)?.getOrNull(2)?.toInt() ?: -1
                 val childContour = contours.getOrNull(childIndex)
-                symbolCandidate(contour, childContour, minimumRadius, maximumRadius)
+                val candidate = symbolCandidate(contour, childContour, minimumRadius, maximumRadius)
+                    ?: return@mapIndexedNotNull null
+                // A digit's hole is not itself an outlined control. Only keep a hole contour
+                // when its parent also has ring geometry (or it contains another printed ring).
+                val parentIndex = hierarchyEntry(hierarchy, index)?.getOrNull(3)?.toInt() ?: -1
+                if (candidate.shape == SymbolShape.CIRCLE && parentIndex >= 0 && childContour == null) {
+                    val parent = contours[parentIndex]
+                    val parentCandidate = symbolCandidate(parent, contour, minimumRadius, maximumRadius)
+                    if (parentCandidate == null || parentCandidate.ringEvidence == RingEvidence.MISMATCH) {
+                        return@mapIndexedNotNull null
+                    }
+                }
+                candidate
             }
             val ringRadii = allCandidates
                 .filter { it.shape == SymbolShape.CIRCLE && it.ringEvidence == RingEvidence.MATCH }
@@ -433,16 +444,20 @@ object OpenCVUtils {
                         inner.center.distanceTo(candidate.center) <= candidate.radius * 0.15f
                 }
                 when {
-                    candidate.ringEvidence == RingEvidence.MATCH -> candidate
+                    candidate.ringEvidence == RingEvidence.MATCH && (referenceRadius == null ||
+                        candidate.radius >= referenceRadius * 0.68f || concentricInnerRing) -> candidate
+                    candidate.ringEvidence == RingEvidence.MATCH -> null
                     candidate.ringEvidence == RingEvidence.MISMATCH && concentricInnerRing ->
                         // Treat hierarchy evidence as two rings, but still require another
                         // accepted concentric contour before classifying a finish.
                         candidate.copy(ringMultiplicity = 2)
                     requireRingHole || candidate.ringEvidence == RingEvidence.MISMATCH -> null
-                    referenceRadius == null -> candidate
+                    referenceRadius == null -> null
                     candidate.radius in
                         (referenceRadius * UNBACKED_RADIUS_MIN_FACTOR)..
-                        (referenceRadius * UNBACKED_RADIUS_MAX_FACTOR) -> candidate
+                        (referenceRadius * UNBACKED_RADIUS_MAX_FACTOR) &&
+                        ringInkCoverage(mask, candidate.center, candidate.radius) >= 0.55 &&
+                        diskInkFraction(mask, candidate.center, candidate.radius * 0.4f) < 0.25 -> candidate
                     else -> null
                 }
             }
@@ -473,12 +488,13 @@ object OpenCVUtils {
 
             val classifiedSymbols = symbolGroups.map { group ->
                 val largest = group.maxBy(SymbolCandidate::radius)
-                val hasTriangle = group.any { it.shape == SymbolShape.TRIANGLE }
+                val hasTriangle = group.any { it.shape == SymbolShape.TRIANGLE } ||
+                    hasOverlappingTriangle(mask, largest.center, largest.radius)
                 val circleCount = group.filter { it.shape == SymbolShape.CIRCLE }
                     .sumOf(SymbolCandidate::ringMultiplicity)
                 val type = when {
-                    circleCount >= 3 -> ControlPointType.FINISH
                     hasTriangle && circleCount > 0 -> ControlPointType.START_FINISH
+                    circleCount >= 3 -> ControlPointType.FINISH
                     hasTriangle -> ControlPointType.START
                     else -> ControlPointType.CONTROL
                 }
@@ -522,9 +538,7 @@ object OpenCVUtils {
             contours.forEach { it.release() }
             houghCircles.release()
             blurredMask.release()
-            kernel.release()
             hierarchy.release()
-            closedMask.release()
             mask.release()
             hsv.release()
             rgb.release()
@@ -865,6 +879,44 @@ object OpenCVUtils {
             if (hasInk) covered++
         }
         return covered.toDouble() / samples
+    }
+
+    /** Crossing outlines lose their contour hierarchy; verify all three straight sides. */
+    private fun hasOverlappingTriangle(mask: Mat, center: Point2D, radius: Float): Boolean {
+        for (factor in listOf(1.2, 1.35, 1.5)) {
+            for (degrees in 0 until 120 step 5) {
+                val vertices = List(3) { index ->
+                    val angle = (degrees + index * 120) * PI / 180.0
+                    Point(center.x + cos(angle) * radius * factor,
+                        center.y + sin(angle) * radius * factor)
+                }
+                if (!vertices.all { vertex ->
+                    val x = vertex.x.roundToInt()
+                    val y = vertex.y.roundToInt()
+                    (-1..1).any { dy -> (-1..1).any { dx ->
+                        x + dx in 0 until mask.cols() && y + dy in 0 until mask.rows() &&
+                            mask.get(y + dy, x + dx)[0] > 0.0
+                    } }
+                }) continue
+                val supported = vertices.indices.all { side ->
+                    val a = vertices[side]
+                    val b = vertices[(side + 1) % 3]
+                    // Exclude vertices where a plain circle intersects a triangle template.
+                    val hits = (2..18).count { step ->
+                        val fraction = step / 20.0
+                        val x = (a.x + (b.x - a.x) * fraction).roundToInt()
+                        val y = (a.y + (b.y - a.y) * fraction).roundToInt()
+                        (-1..1).any { dy -> (-1..1).any { dx ->
+                            x + dx in 0 until mask.cols() && y + dy in 0 until mask.rows() &&
+                                mask.get(y + dy, x + dx)[0] > 0.0
+                        } }
+                    }
+                    hits >= 15
+                }
+                if (supported) return true
+            }
+        }
+        return false
     }
 
     private fun diskInkFraction(mask: Mat, center: Point2D, radius: Float): Double {

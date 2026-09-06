@@ -124,6 +124,39 @@ class OpenCVUtilsTest {
     }
 
     @Test
+    fun detectsSmallDoubleCircleAndOverlappingStartTriangle() {
+        val bitmap = Bitmap.createBitmap(300, 160, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(170, 100, 155)
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f
+        }
+        canvas.drawCircle(50f, 80f, 12f, paint)
+        canvas.drawCircle(130f, 80f, 12f, paint)
+        canvas.drawCircle(130f, 80f, 8f, paint)
+        canvas.drawCircle(230f, 80f, 12f, paint)
+        canvas.drawPath(Path().apply {
+            moveTo(230f, 64f)
+            lineTo(216.14f, 88f)
+            lineTo(243.86f, 88f)
+            close()
+        }, paint)
+        try {
+            val symbols = OpenCVUtils.detectControlSymbols(bitmap)
+            assertTrue(symbols.toString(), symbols.any {
+                it.type == ControlPointType.FINISH && it.center.distanceTo(Point2D(130f, 80f)) < 3f
+            })
+            assertTrue(symbols.toString(), symbols.any {
+                it.type == ControlPointType.START_FINISH && it.center.distanceTo(Point2D(230f, 80f)) < 3f
+            })
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    @Test
     fun strictRingDetectionAcceptsAnnulusAndRejectsFilledCircle() {
         val bitmap = Bitmap.createBitmap(360, 180, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

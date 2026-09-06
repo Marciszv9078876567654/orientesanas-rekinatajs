@@ -357,6 +357,7 @@ fun RouteRenderingCanvas(
                 centers,
                 if (layer.isActive) progress.value else 1f,
                 layer.color.copy(alpha = layer.color.alpha * layerAlpha),
+                zoom = zoom,
             )
         }
         pinnedLayers.filterNot { isolatedRouteId == it.id }.forEach { layer ->
@@ -367,6 +368,7 @@ fun RouteRenderingCanvas(
                 color = layer.color.copy(alpha = layer.color.alpha * 0.82f * otherLayerAlpha),
                 dashIntervals = pinnedRouteDashIntervals(layer.patternIndex),
                 strokeWidth = pinnedStrokeWidths.getValue(layer.id),
+                zoom = zoom,
             )
         }
         val visitedIds = effectiveLayers.flatMap(RouteRenderLayer::points).mapTo(mutableSetOf()) { it.id }
@@ -551,14 +553,14 @@ fun DistanceCalibrationCanvas(
                 color = Color.Black.copy(alpha = 0.55f),
                 start = startCanvas,
                 end = endCanvas,
-                strokeWidth = MEASUREMENT_LINE_OUTLINE_WIDTH_PX,
+                strokeWidth = MEASUREMENT_LINE_OUTLINE_WIDTH_PX * pointScale,
                 cap = StrokeCap.Round,
             )
             drawLine(
                 color = MEASUREMENT_COLOR,
                 start = startCanvas,
                 end = endCanvas,
-                strokeWidth = MEASUREMENT_LINE_WIDTH_PX,
+                strokeWidth = MEASUREMENT_LINE_WIDTH_PX * pointScale,
                 cap = StrokeCap.Round,
             )
         }
@@ -820,12 +822,16 @@ private fun DrawScope.drawRouteLines(
     color: Color,
     dashIntervals: FloatArray? = null,
     strokeWidth: Float = DEFAULT_ROUTE_STROKE_WIDTH,
+    zoom: Float,
 ) {
     if (points.size < 2 || progress <= 0f) return
     val lengths = points.zipWithNext { first, second ->
         hypot(second.x - first.x, second.y - first.y)
     }
-    val pathEffect = dashIntervals?.let { PathEffect.dashPathEffect(it) }
+    val lineScale = controlMarkerScale(zoom)
+    val pathEffect = dashIntervals?.let { intervals ->
+        PathEffect.dashPathEffect(FloatArray(intervals.size) { intervals[it] * lineScale })
+    }
     var remaining = lengths.sum() * progress.coerceIn(0f, 1f)
     val path = Path().apply { moveTo(points.first().x, points.first().y) }
     for ((index, segment) in points.zipWithNext().withIndex()) {
@@ -838,13 +844,13 @@ private fun DrawScope.drawRouteLines(
         remaining -= length
     }
     val shadowStyle = Stroke(
-        width = strokeWidth + ROUTE_SHADOW_WIDTH_EXTRA_PX,
+        width = (strokeWidth + ROUTE_SHADOW_WIDTH_EXTRA_PX) * lineScale,
         cap = StrokeCap.Round,
         join = StrokeJoin.Round,
         pathEffect = pathEffect,
     )
     val routeStyle = Stroke(
-        width = strokeWidth,
+        width = strokeWidth * lineScale,
         cap = StrokeCap.Round,
         join = StrokeJoin.Round,
         pathEffect = pathEffect,
@@ -1060,9 +1066,9 @@ private data class ViewportTransform(
     }
 }
 
-/** Makes control growth obvious by 2x zoom while capping marker size at 1.5x. */
+/** Keeps markers readable while continuing to grow throughout the map's zoom range. */
 internal fun controlMarkerScale(zoom: Float): Float =
-    (1f + (zoom.coerceAtLeast(1f) - 1f) * 0.5f).coerceAtMost(MAX_CONTROL_MARKER_SCALE)
+    sqrt(zoom.coerceAtLeast(1f))
 
 @Composable
 private fun animatedFitQuarterTurns(rotationQuarterTurns: Int): Float {
@@ -1302,7 +1308,6 @@ internal fun updateBoundaryCorner(
 private const val CORNER_TOUCH_RADIUS_PX = 56f
 private const val CONTROL_POINT_OUTER_RADIUS_PX = 13f
 private const val DEFAULT_ROUTE_STROKE_WIDTH = 7f
-private const val MAX_CONTROL_MARKER_SCALE = 1.5f
 private const val CONTROL_SHADOW_WIDTH_PX = 2f
 private const val CONTROL_SHADOW_ALPHA = 0.30f
 private val MEASUREMENT_COLOR = Color(0xFF00CFE8)

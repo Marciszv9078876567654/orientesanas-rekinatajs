@@ -167,6 +167,7 @@ fun RouteDetailsBottomSheet(
                 .height(with(density) { panelHeightPx.toDp() }),
             shape = RoundedCornerShape(topStart = topCorner, topEnd = topCorner),
             color = MaterialTheme.colorScheme.surfaceContainer,
+            contentColor = Color.White,
             tonalElevation = 3.dp,
             shadowElevation = 8.dp * (1f - fullScreenProgress),
         ) {
@@ -255,6 +256,7 @@ fun RouteDetailsBottomSheet(
         PrimaryScrollableTabRow(
             selectedTabIndex = safeSelectedIndex,
             edgePadding = 12.dp,
+            contentColor = Color.White,
         ) {
             routes.forEachIndexed { index, candidate ->
                 val primaryScoreDifference = candidate.totalScore - route.totalScore
@@ -267,6 +269,8 @@ fun RouteDetailsBottomSheet(
                     ?.takeIf(String::isNotBlank)
                 Tab(
                     selected = isSelected,
+                    selectedContentColor = Color.White,
+                    unselectedContentColor = Color.White,
                     onClick = { onRouteSelected(candidate.id) },
                     modifier = Modifier
                         .heightIn(min = routeTabMinimumHeight)

@@ -62,11 +62,10 @@ class MapRotationTest {
     }
 
     @Test
-    fun controlMarkersGrowGraduallyAndStopAtOneAndAHalfTimesSize() {
+    fun controlMarkersKeepGrowingThroughoutTheZoomRange() {
         assertEquals(1f, controlMarkerScale(1f), 0.001f)
-        assertEquals(1.25f, controlMarkerScale(1.5f), 0.001f)
-        assertEquals(1.5f, controlMarkerScale(2f), 0.001f)
-        assertEquals(1.5f, controlMarkerScale(4f), 0.001f)
-        assertEquals(1.5f, controlMarkerScale(12f), 0.001f)
+        assertEquals(2f, controlMarkerScale(4f), 0.001f)
+        assertTrue(listOf(1f, 1.5f, 2f, 4f, 8f, 12f).map(::controlMarkerScale)
+            .zipWithNext().all { (before, after) -> after > before })
     }
 }

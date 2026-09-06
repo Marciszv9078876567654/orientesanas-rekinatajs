@@ -123,6 +123,7 @@ internal fun RouteScreen(
     onEdit: () -> Unit,
     onHome: () -> Unit,
     routeEntryKey: Int,
+    autoOpenRouteGenerator: Boolean = true,
     isCalculatingRoute: Boolean,
     routeMode: RouteMode,
     routeBudgetMeters: Float?,
@@ -206,7 +207,9 @@ internal fun RouteScreen(
     var showRouteRestrictions by rememberSaveable { mutableStateOf(false) }
     var showEditMapRouteWarning by rememberSaveable { mutableStateOf(false) }
     var showManageRoutes by rememberSaveable { mutableStateOf(false) }
-    var showRouteGenerator by rememberSaveable(routeEntryKey) { mutableStateOf(route == null) }
+    var showRouteGenerator by rememberSaveable(routeEntryKey) {
+        mutableStateOf(route == null && autoOpenRouteGenerator)
+    }
     var routeGeneratorOpenedFromMenu by rememberSaveable(routeEntryKey) { mutableStateOf(false) }
     var requestedRouteMode by rememberSaveable { mutableStateOf(routeMode) }
     var waitingForPrimaryRoute by rememberSaveable { mutableStateOf(false) }

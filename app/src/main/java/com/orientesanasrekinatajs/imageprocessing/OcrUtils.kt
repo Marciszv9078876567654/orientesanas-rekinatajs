@@ -13,13 +13,13 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 /** On-device OCR operations for extracting orienteering control numbers. */
 object OcrUtils {
     private const val MIN_INPUT_DIMENSION = 32
-    private const val TARGET_TEXT_DIMENSION = 160
-    private const val MAX_UPSCALE_FACTOR = 4f
+    private const val TARGET_TEXT_DIMENSION = 240
+    private const val MAX_UPSCALE_FACTOR = 8f
     private val controlNumberPattern = Regex(
-        """(?<![A-Za-z0-9])\d(?:\s?\d){1,2}(?![A-Za-z0-9])""",
+        """(?<![A-Za-z0-9])(?:\d{2,3}|\d(?:\s\d){1,2})(?![A-Za-z0-9])""",
     )
     private val ambiguousControlNumberPattern = Regex(
-        """(?<![A-Za-z0-9])[0-9BOSIl](?:\s?[0-9BOSIl]){1,2}(?![A-Za-z0-9])""",
+        """(?<![A-Za-z0-9])(?:[0-9BOSIl]{2,3}|[0-9BOSIl](?:\s[0-9BOSIl]){1,2})(?![A-Za-z0-9])""",
     )
     private val recognizer by lazy {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)

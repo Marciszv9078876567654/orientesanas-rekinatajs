@@ -164,7 +164,7 @@ internal fun EditMapScreen(
                 }
                 Button(
                     onClick = onConfirmColorCalibration,
-                    enabled = processingState.pendingColorCalibration != null &&
+                    enabled = processingState.calibrationReferencePoints.isNotEmpty() &&
                         !processingState.isSamplingColor,
                     modifier = Modifier.weight(1f),
                 ) {
@@ -375,8 +375,8 @@ internal fun EditMapScreen(
                     Surface(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp).size(56.dp),
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.inverseSurface,
-                        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         tonalElevation = 5.dp,
                     ) {
                         IconButton(

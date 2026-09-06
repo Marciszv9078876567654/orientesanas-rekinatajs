@@ -1,6 +1,9 @@
 package com.orientesanasrekinatajs.imageprocessing
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import com.orientesanasrekinatajs.domain.model.Point2D
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -21,6 +24,7 @@ object ImageCropUtils {
         bitmap: Bitmap,
         center: Point2D,
         radius: Float,
+        eraseSymbol: Boolean = false,
     ): Bitmap {
         require(radius.isFinite() && radius > 0f) { "Radius must be finite and positive" }
         require(center.x.isFinite() && center.y.isFinite()) { "Center coordinates must be finite" }
@@ -43,7 +47,14 @@ object ImageCropUtils {
             bitmap.height,
         )
 
-        return Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+        val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+        if (!eraseSymbol) return crop
+        // Keep the label in context without letting the circle join a digit or read as "0".
+        return crop.copy(Bitmap.Config.ARGB_8888, true).also { label ->
+            Canvas(label).drawCircle(center.x - left, center.y - top, radius * 1.08f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+            if (crop !== bitmap) crop.recycle()
+        }
     }
 
     private fun expandToMinimumSize(start: Int, end: Int, limit: Int): Pair<Int, Int> {

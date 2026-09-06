@@ -77,6 +77,7 @@ internal fun MapFlowScreen(
     onCancelColorCalibration: () -> Unit,
     onDismissProcessingError: () -> Unit,
     onDismissReviewSummary: () -> Unit,
+    onRestoreMapState: (MapProcessingUiState) -> Unit,
     onInvalidateRoute: () -> Unit,
     onCalculateRoute: (Float, RouteMode, Float?, Int?) -> Unit,
     onGenerateAlternativeRoutes: (List<ControlPoint>, Float, AlternativeRouteCriteria) -> Unit,
@@ -87,7 +88,6 @@ internal fun MapFlowScreen(
     onSaveMap: (SavedMapDraft, (ScannedMapEntity) -> Unit) -> Unit,
     onRenameSavedMap: (String, String, (ScannedMapEntity) -> Unit) -> Unit,
     onDeleteSavedMap: (String, () -> Unit) -> Unit,
-    onReloadSavedMap: (String) -> Unit,
     isSavingMap: Boolean,
     isTransferringMap: Boolean,
     rotation: Int,
@@ -119,10 +119,23 @@ internal fun MapFlowScreen(
     var savedMapName by rememberSaveable(sessionKey) { mutableStateOf(processingState.savedMapName) }
     var routeEntryKey by rememberSaveable(sessionKey) { mutableIntStateOf(0) }
     var awaitingRouteGeneration by rememberSaveable(sessionKey) { mutableStateOf(false) }
+    var returningFromCancelledEdit by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var mapEditChangedSinceEntry by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var editOpenedFromRoute by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var isDirty by rememberSaveable(sessionKey) {
         mutableStateOf(processingState.savedMapId == null || processingState.savedContentDirty)
+    }
+    var editSnapshot by remember(sessionKey) { mutableStateOf(processingState) }
+    var editLineStart by remember(sessionKey) { mutableStateOf(lineStart) }
+    var editLineEnd by remember(sessionKey) { mutableStateOf(lineEnd) }
+    var editLineDistance by remember(sessionKey) { mutableStateOf(lineDistanceText) }
+    var editWasDirty by remember(sessionKey) { mutableStateOf(isDirty) }
+    LaunchedEffect(processingState.controlPoints, processingState.rectifiedBitmap) {
+        if (page == MapPage.EDIT && (processingState.controlPoints != editSnapshot.controlPoints ||
+                processingState.rectifiedBitmap !== editSnapshot.rectifiedBitmap)) {
+            mapEditChangedSinceEntry = true
+            isDirty = true
+        }
     }
     val currentLineStart = lineStart
     val currentLineEnd = lineEnd
@@ -312,12 +325,18 @@ internal fun MapFlowScreen(
                 savedMapId?.let { id -> onDeleteSavedMap(id, onBackHome) }
             },
             onEdit = {
+                editSnapshot = processingState
+                editLineStart = lineStart
+                editLineEnd = lineEnd
+                editLineDistance = lineDistanceText
+                editWasDirty = isDirty
                 mapEditChangedSinceEntry = false
                 editOpenedFromRoute = true
                 page = MapPage.EDIT
             },
             onHome = onBackHome,
             routeEntryKey = routeEntryKey,
+            autoOpenRouteGenerator = !returningFromCancelledEdit,
             isCalculatingRoute = routingState.isCalculating,
             routeMode = routingState.mode,
             routeBudgetMeters = routingState.budgetMeters,
@@ -366,46 +385,38 @@ internal fun MapFlowScreen(
             onUpdateControlPoint = {
                 isDirty = true
                 mapEditChangedSinceEntry = true
-                onInvalidateRoute()
                 onUpdateControlPoint(it)
             },
             onAddControlPoint = {
                 isDirty = true
                 mapEditChangedSinceEntry = true
-                onInvalidateRoute()
                 onAddControlPoint(it)
             },
             onRemoveControlPoint = {
                 isDirty = true
                 mapEditChangedSinceEntry = true
-                onInvalidateRoute()
                 onRemoveControlPoint(it)
             },
             onClearControlPoints = {
                 isDirty = true
                 mapEditChangedSinceEntry = true
-                onInvalidateRoute()
                 onClearControlPoints()
             },
             onStartColorCalibration = onStartColorCalibration,
             onApplyColorCalibrationSample = onApplyColorCalibrationSample,
             onMoveColorCalibrationReference = onMoveColorCalibrationReference,
             onClearColorCalibrationReferences = onClearColorCalibrationReferences,
-            onConfirmColorCalibration = {
-                isDirty = true
-                mapEditChangedSinceEntry = true
-                lineStart = null
-                lineEnd = null
-                lineDistanceText = ""
-                onInvalidateRoute()
-                onConfirmColorCalibration()
-            },
+            onConfirmColorCalibration = onConfirmColorCalibration,
             onCancelColorCalibration = onCancelColorCalibration,
             onDismissProcessingError = onDismissProcessingError,
             onDismissReviewSummary = onDismissReviewSummary,
             onOpenRoute = {
+                returningFromCancelledEdit = false
                 val needsGeneration = routingState.route == null || mapEditChangedSinceEntry
-                if (needsGeneration) routeEntryKey++
+                if (needsGeneration) {
+                    onInvalidateRoute()
+                    routeEntryKey++
+                }
                 awaitingRouteGeneration = needsGeneration
                 editOpenedFromRoute = false
                 page = MapPage.ROUTE
@@ -418,14 +429,12 @@ internal fun MapFlowScreen(
             onLineChange = { start, end ->
                 isDirty = true
                 mapEditChangedSinceEntry = true
-                onInvalidateRoute()
                 lineStart = start
                 lineEnd = end
             },
             onLineDistanceChange = {
                 isDirty = true
                 mapEditChangedSinceEntry = true
-                onInvalidateRoute()
                 lineDistanceText = it
             },
             rotation = rotation,
@@ -436,11 +445,16 @@ internal fun MapFlowScreen(
             onRotationChange = onRotationChange,
             onCancel = if (editOpenedFromRoute) {
                 {
+                    returningFromCancelledEdit = true
                     awaitingRouteGeneration = false
                     mapEditChangedSinceEntry = false
                     editOpenedFromRoute = false
                     page = MapPage.ROUTE
-                    savedMapId?.let(onReloadSavedMap)
+                    onRestoreMapState(editSnapshot)
+                    lineStart = editLineStart
+                    lineEnd = editLineEnd
+                    lineDistanceText = editLineDistance
+                    isDirty = editWasDirty
                     Unit
                 }
             } else {
@@ -448,11 +462,16 @@ internal fun MapFlowScreen(
             },
             onBack = if (editOpenedFromRoute) {
                 {
+                    returningFromCancelledEdit = true
                     awaitingRouteGeneration = false
                     mapEditChangedSinceEntry = false
                     editOpenedFromRoute = false
                     page = MapPage.ROUTE
-                    savedMapId?.let(onReloadSavedMap)
+                    onRestoreMapState(editSnapshot)
+                    lineStart = editLineStart
+                    lineEnd = editLineEnd
+                    lineDistanceText = editLineDistance
+                    isDirty = editWasDirty
                     Unit
                 }
             } else {

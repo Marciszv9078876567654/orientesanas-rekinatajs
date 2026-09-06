@@ -50,6 +50,10 @@ android {
     buildFeatures {
         compose = true
     }
+    if (providers.gradleProperty("includeMapExampleTests").orNull == "true") {
+        sourceSets.getByName("androidTest").assets.srcDir("../docs/map-examples")
+        sourceSets.getByName("androidTest").java.srcDir("src/mapExampleTest/java")
+    }
 }
 
 dependencies {
