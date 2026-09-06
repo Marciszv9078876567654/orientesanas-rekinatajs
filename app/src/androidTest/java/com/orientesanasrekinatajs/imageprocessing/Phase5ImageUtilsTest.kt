@@ -90,6 +90,32 @@ class Phase5ImageUtilsTest {
     }
 
     @Test
+    fun recognizesControlLabelThroughProductionCropAndInkIsolation() = runBlocking {
+        val bitmap = Bitmap.createBitmap(200, 160, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(170, 100, 155)
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+        }
+        canvas.drawCircle(90f, 80f, 12f, ink)
+        ink.style = Paint.Style.FILL
+        ink.textSize = 18f
+        canvas.drawText("65", 106f, 85f, ink)
+        val crop = ImageCropUtils.cropRegionOfInterest(bitmap, Point2D(90f, 80f), 13f,
+            eraseSymbol = true)
+        val isolated = OpenCVUtils.isolateInkColor(crop)
+        try {
+            assertEquals(65, OcrUtils.extractControlNumber(isolated))
+        } finally {
+            isolated.recycle()
+            crop.recycle()
+            bitmap.recycle()
+        }
+    }
+
+    @Test
     fun controlNumberParserAcceptsDigitsSplitByOcrSpacing() {
         assertEquals(listOf(83, 101), OcrUtils.controlNumbersIn("8 3   1 0 1"))
     }

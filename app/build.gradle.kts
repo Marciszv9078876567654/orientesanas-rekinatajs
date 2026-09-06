@@ -37,9 +37,18 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            proguardFiles("proguard-rules.pro")
 
             optimization {
                 enable = true
+            }
+        }
+        if (providers.gradleProperty("testOptimizedOcr").orNull == "true") {
+            create("ocrCheck") {
+                initWith(getByName("release"))
+                applicationIdSuffix = ".ocrcheck"
+                signingConfig = signingConfigs.getByName("debug")
+                matchingFallbacks += "release"
             }
         }
     }
