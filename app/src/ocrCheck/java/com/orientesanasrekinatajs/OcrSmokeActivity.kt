@@ -19,6 +19,7 @@ class OcrSmokeActivity : Activity() {
         super.onCreate(savedInstanceState)
         Thread {
             try {
+                checkOpenCvBoundaries()
                 runBlocking {
                     val bitmap = Bitmap.createBitmap(200, 160, Bitmap.Config.ARGB_8888)
                     val canvas = Canvas(bitmap)
@@ -47,5 +48,27 @@ class OcrSmokeActivity : Activity() {
                 runOnUiThread { finish() }
             }
         }.start()
+    }
+
+    private fun checkOpenCvBoundaries() {
+        val bitmap = Bitmap.createBitmap(200, 160, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            canvas.drawRect(30f, 30f, 170f, 130f, Paint().apply { color = Color.BLACK })
+            val boundary = checkNotNull(OpenCVUtils.detectBoundaries(bitmap)) {
+                "OpenCV boundary detection returned no quadrilateral"
+            }
+            check(boundary.corners().all { point ->
+                (kotlin.math.abs(point.x - 30f) <= 5f || kotlin.math.abs(point.x - 170f) <= 5f) &&
+                    (kotlin.math.abs(point.y - 30f) <= 5f || kotlin.math.abs(point.y - 130f) <= 5f)
+            }) { "OpenCV boundary coordinates were unexpected: $boundary" }
+            Log.i("OcrSmoke", "PASS: OpenCV native boundary detection")
+        } catch (failure: Throwable) {
+            Log.e("OcrSmoke", "FAIL: OpenCV native boundary detection", failure)
+            throw failure
+        } finally {
+            bitmap.recycle()
+        }
     }
 }

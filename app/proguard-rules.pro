@@ -3,3 +3,10 @@
 -keep class com.google.mlkit.** implements com.google.firebase.components.ComponentRegistrar {
     public <init>();
 }
+
+# OpenCV's Java bridge binds native methods to libopencv_java*.so by name.
+# Keep this scoped safety net even though Android's default rules also protect JNI,
+# so removing the default rules accidentally cannot break this dependency's bridge.
+-keepclasseswithmembernames class org.opencv.** {
+    native <methods>;
+}
