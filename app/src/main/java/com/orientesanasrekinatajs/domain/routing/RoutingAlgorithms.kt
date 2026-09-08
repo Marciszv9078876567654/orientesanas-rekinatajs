@@ -2,10 +2,12 @@ package com.orientesanasrekinatajs.domain.routing
 
 import com.orientesanasrekinatajs.domain.model.ControlPoint
 
-/** Deterministic routing heuristics for the application's two route modes. */
+/** Exact search for small problems, with deterministic heuristics for larger ones. */
 object RoutingAlgorithms {
     private const val DISTANCE_EPSILON = 0.0001f
     private const val MAX_TWO_OPT_PASSES = 64
+    private const val MAX_EXACT_CONTROLS = 15
+    private const val MAX_ROUTE_SEEDS = 8
 
     /** Visits every supplied control using nearest neighbor, with [finish] fixed at the end. */
     fun nearestNeighbor(
@@ -79,19 +81,41 @@ object RoutingAlgorithms {
         return optimized
     }
 
-    /** Runs nearest neighbor followed by fixed-endpoint 2-opt. */
+    /** Finds the optimum up to 15 controls; otherwise compares several 2-opt starting routes. */
     fun shortestRoute(
         distanceMatrix: DistanceMatrix,
         start: ControlPoint,
         finish: ControlPoint,
         controlPoints: List<ControlPoint>,
-    ): List<ControlPoint> = twoOpt(
-        nearestNeighbor(distanceMatrix, start, finish, controlPoints),
-        distanceMatrix,
-    )
+    ): List<ControlPoint> {
+        validateInputs(distanceMatrix, start, finish, controlPoints)
+        val controls = eligibleControls(start, finish, controlPoints)
+        if (controls.size <= MAX_EXACT_CONTROLS) {
+            return exactRoute(distanceMatrix, start, finish, controls)
+        }
+        var best = twoOpt(nearestNeighbor(distanceMatrix, start, finish, controls), distanceMatrix)
+        var bestDistance = totalDistance(best, distanceMatrix)
+        val seeds = controls.sortedWith(compareBy<ControlPoint> { distanceMatrix[start, it] }
+            .thenBy(ControlPoint::code).thenBy(ControlPoint::id))
+        // Spread a bounded number of seeds across nearby and distant first controls.
+        repeat(MAX_ROUTE_SEEDS) { index ->
+            val seed = seeds[index * seeds.lastIndex / (MAX_ROUTE_SEEDS - 1)]
+            val candidate = twoOpt(
+                listOf(start) + nearestNeighbor(distanceMatrix, seed, finish, controls),
+                distanceMatrix,
+            )
+            val distance = totalDistance(candidate, distanceMatrix)
+            if (distance < bestDistance) {
+                best = candidate
+                bestDistance = distance
+            }
+        }
+        return best
+    }
 
     /**
-     * Greedily maximizes score-to-added-distance while keeping total distance within [budgetMeters].
+     * Maximizes score within [budgetMeters], exactly up to 15 positive-score controls.
+     * Larger problems use score-to-added-distance insertion with route reoptimization.
      *
      * Returns an empty list when the direct start-to-finish leg itself is not feasible.
      */
@@ -105,6 +129,10 @@ object RoutingAlgorithms {
         validateInputs(distanceMatrix, start, finish, controlPoints)
         require(budgetMeters.isFinite() && budgetMeters >= 0f) {
             "budgetMeters must be finite and non-negative"
+        }
+        val controls = eligibleControls(start, finish, controlPoints).filter { it.points > 0 }
+        if (controls.size <= MAX_EXACT_CONTROLS) {
+            return exactRoute(distanceMatrix, start, finish, controls, budgetMeters = budgetMeters)
         }
 
         var route = mutableListOf(start, finish)
@@ -146,7 +174,9 @@ object RoutingAlgorithms {
             val selected = bestInsertion ?: break
             route.add(selected.edgeIndex + 1, selected.point)
             remaining.removeAll { it.id == selected.point.id }
-            currentDistance += selected.addedDistance
+            // Shortening now may make another control feasible on the next iteration.
+            route = twoOpt(route, distanceMatrix).toMutableList()
+            currentDistance = totalDistance(route, distanceMatrix)
         }
 
         return twoOpt(route, distanceMatrix)
@@ -154,8 +184,7 @@ object RoutingAlgorithms {
 
     /**
      * Finds a short route whose collected control score is at least [targetScore].
-     * Controls are inserted by added-distance cost per useful score point, then unnecessary
-     * controls are pruned while the requested score remains satisfied.
+     * Solves exactly up to 15 positive-score controls. Larger problems use insertion and pruning.
      */
     fun shortestRouteForScore(
         distanceMatrix: DistanceMatrix,
@@ -172,6 +201,12 @@ object RoutingAlgorithms {
             .toMutableList()
         require(remaining.sumOf(ControlPoint::points) >= targetScore) {
             "The requested score is higher than the available control score"
+        }
+        if (remaining.size <= MAX_EXACT_CONTROLS) {
+            return exactRoute(
+                distanceMatrix, start, finish,
+                eligibleControls(start, finish, remaining), targetScore = targetScore,
+            )
         }
         var route = mutableListOf(start, finish)
         var collectedScore = 0
@@ -211,8 +246,8 @@ object RoutingAlgorithms {
         while (true) {
             val removable = route
                 .withIndex()
-                .filter { (_, point) ->
-                    point.type == com.orientesanasrekinatajs.domain.model.ControlPointType.CONTROL &&
+                .filter { (index, point) ->
+                    index > 0 && index < route.lastIndex &&
                         collectedScore - point.points >= targetScore
                 }
                 .map { (index, point) ->
@@ -242,6 +277,96 @@ object RoutingAlgorithms {
         return path.zipWithNext().sumOf { (from, to) ->
             distanceMatrix[from, to].toDouble()
         }.toFloat()
+    }
+
+    private fun eligibleControls(
+        start: ControlPoint,
+        finish: ControlPoint,
+        controls: List<ControlPoint>,
+    ) = controls.filterNot { it.id == start.id || it.id == finish.id }
+        .distinctBy(ControlPoint::id)
+        .sortedWith(compareBy(ControlPoint::code, ControlPoint::id))
+
+    /**
+     * Held–Karp subset search: retain the shortest path for each visited set and last control.
+     * Every subset can then be evaluated for either score objective without greedy selection.
+     * At 15 controls the distance/parent tables occupy under 5 MiB; larger inputs stay heuristic.
+     */
+    private fun exactRoute(
+        matrix: DistanceMatrix,
+        start: ControlPoint,
+        finish: ControlPoint,
+        controls: List<ControlPoint>,
+        budgetMeters: Float? = null,
+        targetScore: Int? = null,
+    ): List<ControlPoint> {
+        val count = controls.size
+        val setCount = 1 shl count
+        val distances = DoubleArray(setCount * count) { Double.POSITIVE_INFINITY }
+        val parents = ByteArray(setCount * count) { -1 }
+        val scores = LongArray(setCount)
+        val legs = Array(count) { from -> DoubleArray(count) { to ->
+            matrix[controls[from], controls[to]].toDouble()
+        } }
+        val finishLegs = DoubleArray(count) { matrix[controls[it], finish].toDouble() }
+        for (last in controls.indices) {
+            distances[(1 shl last) * count + last] = matrix[start, controls[last]].toDouble()
+        }
+
+        var bestMask = -1
+        var bestLast = -1
+        var bestDistance = Double.POSITIVE_INFINITY
+        var bestScore = -1L
+        fun consider(mask: Int, last: Int, distance: Double) {
+            val score = scores[mask]
+            if (budgetMeters != null && distance > budgetMeters.toDouble() + DISTANCE_EPSILON) return
+            if (targetScore != null && score < targetScore) return
+            if (budgetMeters == null && targetScore == null && mask != setCount - 1) return
+            val better = if (budgetMeters != null) {
+                score > bestScore || (score == bestScore && distance < bestDistance)
+            } else {
+                distance < bestDistance
+            }
+            if (better) {
+                bestMask = mask
+                bestLast = last
+                bestDistance = distance
+                bestScore = score
+            }
+        }
+        consider(0, -1, matrix[start, finish].toDouble())
+        for (mask in 1 until setCount) {
+            val bit = Integer.numberOfTrailingZeros(mask)
+            scores[mask] = scores[mask xor (1 shl bit)] + controls[bit].points
+            for (last in controls.indices) {
+                if (mask and (1 shl last) == 0) continue
+                val previousMask = mask xor (1 shl last)
+                val state = mask * count + last
+                if (previousMask != 0) {
+                    for (previous in controls.indices) {
+                        if (previousMask and (1 shl previous) == 0) continue
+                        val distance = distances[previousMask * count + previous] + legs[previous][last]
+                        if (distance < distances[state]) {
+                            distances[state] = distance
+                            parents[state] = previous.toByte()
+                        }
+                    }
+                }
+                consider(mask, last, distances[state] + finishLegs[last])
+            }
+        }
+        if (bestMask < 0) return emptyList()
+        val reversed = mutableListOf(finish)
+        var mask = bestMask
+        var last = bestLast
+        while (last >= 0) {
+            reversed += controls[last]
+            val previous = parents[mask * count + last].toInt()
+            mask = mask xor (1 shl last)
+            last = previous
+        }
+        reversed += start
+        return reversed.asReversed()
     }
 
     private fun validateInputs(

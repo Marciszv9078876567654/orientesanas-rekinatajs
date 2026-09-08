@@ -252,4 +252,7 @@
         <item quantity="one">%1$d control point needs review. It is marked with a question mark on the map.</item>
         <item quantity="other">%1$d control points need review. They are marked with question marks on the map.</item>
     </plurals>
+    <string name="absolute_values">Absolute</string>
+    <string name="relative_values">Relative</string>
+    <string name="show_point_numbering">Show point numbering</string>
 </resources>

@@ -80,30 +80,41 @@ internal fun AlternativeRoutesDialog(
     var maxDistanceText by rememberSaveable { mutableStateOf("") }
     var minScoreText by rememberSaveable { mutableStateOf("") }
     var maxScoreText by rememberSaveable { mutableStateOf("") }
+    var useAbsoluteDistanceValues by rememberSaveable { mutableStateOf(false) }
+    var useAbsoluteScoreValues by rememberSaveable { mutableStateOf(false) }
     var useRelativeDistanceValues by rememberSaveable { mutableStateOf(false) }
     var useRelativeScoreValues by rememberSaveable { mutableStateOf(false) }
+    var distanceUnderText by rememberSaveable { mutableStateOf("") }
+    var distanceOverText by rememberSaveable { mutableStateOf("") }
+    var pointsUnderText by rememberSaveable { mutableStateOf("") }
+    var pointsOverText by rememberSaveable { mutableStateOf("") }
     val count = countText.toIntOrNull()
-    val minDistance = minDistanceText.localizedFloatOrNull()
-    val maxDistance = maxDistanceText.localizedFloatOrNull()
-    val minScore = minScoreText.toIntOrNull()
-    val maxScore = maxScoreText.toIntOrNull()
+    val minDistance = minDistanceText.localizedFloatOrNull().takeIf { useAbsoluteDistanceValues }
+    val maxDistance = maxDistanceText.localizedFloatOrNull().takeIf { useAbsoluteDistanceValues }
+    val minScore = minScoreText.toIntOrNull().takeIf { useAbsoluteScoreValues }
+    val maxScore = maxScoreText.toIntOrNull().takeIf { useAbsoluteScoreValues }
+    val distanceUnder = distanceUnderText.localizedFloatOrNull().takeIf { useRelativeDistanceValues }
+    val distanceOver = distanceOverText.localizedFloatOrNull().takeIf { useRelativeDistanceValues }
+    val pointsUnder = pointsUnderText.toIntOrNull().takeIf { useRelativeScoreValues }
+    val pointsOver = pointsOverText.toIntOrNull().takeIf { useRelativeScoreValues }
+    fun validDistance(text: String) = text.isBlank() ||
+        text.localizedFloatOrNull()?.let { it.isFinite() && it >= 0f } == true
+    fun validScore(text: String) = text.isBlank() || text.toIntOrNull()?.let { it >= 0 } == true
     val fieldsValid = count != null && count in 1..20 &&
-        (minDistanceText.isBlank() || minDistance != null) &&
-        (maxDistanceText.isBlank() || maxDistance != null) &&
-        (minScoreText.isBlank() || minScore != null) &&
-        (maxScoreText.isBlank() || maxScore != null)
-    val resolvedMinDistance = minDistance?.let {
-        if (useRelativeDistanceValues) sourceRoute.totalDistanceMeters - it else it
-    }
-    val resolvedMaxDistance = maxDistance?.let {
-        if (useRelativeDistanceValues) sourceRoute.totalDistanceMeters + it else it
-    }
-    val resolvedMinScore = minScore?.let {
-        if (useRelativeScoreValues) sourceRoute.totalScore - it else it
-    }
-    val resolvedMaxScore = maxScore?.let {
-        if (useRelativeScoreValues) sourceRoute.totalScore + it else it
-    }
+        (!useAbsoluteDistanceValues || validDistance(minDistanceText) && validDistance(maxDistanceText)) &&
+        (!useRelativeDistanceValues || validDistance(distanceUnderText) && validDistance(distanceOverText)) &&
+        (!useAbsoluteScoreValues || validScore(minScoreText) && validScore(maxScoreText)) &&
+        (!useRelativeScoreValues || validScore(pointsUnderText) && validScore(pointsOverText))
+    val (resolvedMinDistance, resolvedMaxDistance) = intersectAlternativeBounds(
+        minDistance, maxDistance,
+        distanceUnder?.let { (sourceRoute.totalDistanceMeters - it).coerceAtLeast(0f) },
+        distanceOver?.let { sourceRoute.totalDistanceMeters + it },
+    )
+    val (resolvedMinScore, resolvedMaxScore) = intersectAlternativeBounds(
+        minScore, maxScore,
+        pointsUnder?.let { (sourceRoute.totalScore.toLong() - it).coerceAtLeast(0).toInt() },
+        pointsOver?.let { (sourceRoute.totalScore.toLong() + it).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() },
+    )
     val boundsValid = (resolvedMinDistance == null || resolvedMaxDistance == null ||
         resolvedMinDistance <= resolvedMaxDistance) &&
         (resolvedMinScore == null || resolvedMaxScore == null || resolvedMinScore <= resolvedMaxScore)
@@ -241,63 +252,128 @@ internal fun AlternativeRoutesDialog(
                     stringResource(R.string.distance_bounds),
                     style = MaterialTheme.typography.labelLarge,
                 )
-                RelativeValuesToggle(
-                    label = stringResource(R.string.relative_distance_values),
-                    checked = useRelativeDistanceValues,
-                    onCheckedChange = { useRelativeDistanceValues = it },
-                    enabled = !isGenerating,
-                )
-                AlternativeCriterionField(
-                    value = minDistanceText,
-                    onValueChange = { minDistanceText = it },
-                    label = stringResource(
-                        if (useRelativeDistanceValues) R.string.distance_under_meters
-                        else R.string.minimum_distance_meters,
-                    ),
-                    enabled = !isGenerating,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                AlternativeCriterionField(
-                    value = maxDistanceText,
-                    onValueChange = { maxDistanceText = it },
-                    label = stringResource(
-                        if (useRelativeDistanceValues) R.string.distance_over_meters
-                        else R.string.maximum_distance_meters,
-                    ),
-                    enabled = !isGenerating,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    AlternativeBoundsToggle(
+                        label = stringResource(R.string.absolute_values),
+                        checked = useAbsoluteDistanceValues,
+                        onCheckedChange = { useAbsoluteDistanceValues = it },
+                        enabled = !isGenerating,
+                    )
+                    if (useAbsoluteDistanceValues) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AlternativeCriterionField(
+                                value = minDistanceText,
+                                onValueChange = { minDistanceText = it },
+                                label = stringResource(R.string.minimum_distance_meters),
+                                enabled = !isGenerating,
+                                integerOnly = false,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            AlternativeCriterionField(
+                                value = maxDistanceText,
+                                onValueChange = { maxDistanceText = it },
+                                label = stringResource(R.string.maximum_distance_meters),
+                                enabled = !isGenerating,
+                                integerOnly = false,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    AlternativeBoundsToggle(
+                        label = stringResource(R.string.relative_values),
+                        checked = useRelativeDistanceValues,
+                        onCheckedChange = { useRelativeDistanceValues = it },
+                        enabled = !isGenerating,
+                    )
+                    if (useRelativeDistanceValues) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AlternativeCriterionField(
+                                value = distanceUnderText,
+                                onValueChange = { distanceUnderText = it },
+                                label = stringResource(R.string.distance_under_meters),
+                                enabled = !isGenerating,
+                                integerOnly = false,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            AlternativeCriterionField(
+                                value = distanceOverText,
+                                onValueChange = { distanceOverText = it },
+                                label = stringResource(R.string.distance_over_meters),
+                                enabled = !isGenerating,
+                                integerOnly = false,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
                 HorizontalDivider()
-                Text(
-                    stringResource(R.string.score_bounds),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                RelativeValuesToggle(
-                    label = stringResource(R.string.relative_score_values),
-                    checked = useRelativeScoreValues,
-                    onCheckedChange = { useRelativeScoreValues = it },
-                    enabled = !isGenerating,
-                )
-                AlternativeCriterionField(
-                    value = minScoreText,
-                    onValueChange = { minScoreText = it },
-                    label = stringResource(
-                        if (useRelativeScoreValues) R.string.points_under else R.string.minimum_points,
-                    ),
-                    enabled = !isGenerating,
-                    integerOnly = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                AlternativeCriterionField(
-                    value = maxScoreText,
-                    onValueChange = { maxScoreText = it },
-                    label = stringResource(
-                        if (useRelativeScoreValues) R.string.points_over else R.string.maximum_points,
-                    ),
-                    enabled = !isGenerating,
-                    integerOnly = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Text(stringResource(R.string.score_bounds), style = MaterialTheme.typography.labelLarge)
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    AlternativeBoundsToggle(
+                        label = stringResource(R.string.absolute_values),
+                        checked = useAbsoluteScoreValues,
+                        onCheckedChange = { useAbsoluteScoreValues = it },
+                        enabled = !isGenerating,
+                    )
+                    if (useAbsoluteScoreValues) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AlternativeCriterionField(
+                                value = minScoreText,
+                                onValueChange = { minScoreText = it },
+                                label = stringResource(R.string.minimum_points),
+                                enabled = !isGenerating,
+                                integerOnly = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            AlternativeCriterionField(
+                                value = maxScoreText,
+                                onValueChange = { maxScoreText = it },
+                                label = stringResource(R.string.maximum_points),
+                                enabled = !isGenerating,
+                                integerOnly = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    AlternativeBoundsToggle(
+                        label = stringResource(R.string.relative_values),
+                        checked = useRelativeScoreValues,
+                        onCheckedChange = { useRelativeScoreValues = it },
+                        enabled = !isGenerating,
+                    )
+                    if (useRelativeScoreValues) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AlternativeCriterionField(
+                                value = pointsUnderText,
+                                onValueChange = { pointsUnderText = it },
+                                label = stringResource(R.string.points_under),
+                                enabled = !isGenerating,
+                                integerOnly = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            AlternativeCriterionField(
+                                value = pointsOverText,
+                                onValueChange = { pointsOverText = it },
+                                label = stringResource(R.string.points_over),
+                                enabled = !isGenerating,
+                                integerOnly = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
                 HorizontalDivider()
                 Text(
                     stringResource(R.string.empty_bounds_help),
@@ -322,12 +398,10 @@ internal fun AlternativeRoutesDialog(
                         AlternativeRouteCriteria(
                             count = requireNotNull(count),
                             sourceRouteId = sourceRoute.id,
-                            minDistanceMeters = minDistance,
-                            maxDistanceMeters = maxDistance,
-                            minScore = minScore,
-                            maxScore = maxScore,
-                            useRelativeDistanceValues = useRelativeDistanceValues,
-                            useRelativeScoreValues = useRelativeScoreValues,
+                            minDistanceMeters = resolvedMinDistance,
+                            maxDistanceMeters = resolvedMaxDistance,
+                            minScore = resolvedMinScore,
+                            maxScore = resolvedMaxScore,
                             fixedPrefixPointCount = splitAfterIndex + 1,
                         ),
                     )
@@ -350,7 +424,7 @@ internal fun AlternativeRoutesDialog(
 }
 
 @Composable
-private fun RelativeValuesToggle(
+private fun AlternativeBoundsToggle(
     label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,

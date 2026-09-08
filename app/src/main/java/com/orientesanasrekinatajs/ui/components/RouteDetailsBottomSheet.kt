@@ -34,11 +34,15 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.OutlinedButton
@@ -94,6 +98,11 @@ fun RouteDetailsBottomSheet(
     routeMetadata: Map<String, RouteMetadata> = emptyMap(),
     selectedRouteId: String? = null,
     showPointsPerKilometer: Boolean = false,
+    onShowPointsPerKilometerChange: (Boolean) -> Unit = {},
+    showRelativeValues: Boolean = true,
+    onShowRelativeValuesChange: (Boolean) -> Unit = {},
+    showPointNumbering: Boolean = true,
+    onShowPointNumberingChange: (Boolean) -> Unit = {},
     onRouteSelected: (String) -> Unit = {},
     panelState: RouteDetailsPanelState,
     onPanelStateChange: (RouteDetailsPanelState) -> Unit,
@@ -110,7 +119,7 @@ fun RouteDetailsBottomSheet(
     val selectedRoute = routes[safeSelectedIndex]
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val density = LocalDensity.current
-        val minimizedHeight = if (showPointsPerKilometer) 160.dp else 136.dp
+        val minimizedHeight = if (showPointsPerKilometer) 166.dp else 142.dp
         val routeTabMinimumHeight = if (showPointsPerKilometer) 104.dp else 48.dp
         val minimumHeightPx = with(density) { minimizedHeight.toPx() }
         val maximumHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(minimumHeightPx)
@@ -245,12 +254,37 @@ fun RouteDetailsBottomSheet(
                     .clip(RoundedCornerShape(2.dp))
                     .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
             )
-            Box(Modifier.fillMaxWidth().height(42.dp)) {
+            Box(Modifier.fillMaxWidth().height(48.dp)) {
+                Row(Modifier.align(Alignment.CenterStart)) {
+                    IconToggleButton(
+                        checked = showPointsPerKilometer,
+                        onCheckedChange = onShowPointsPerKilometerChange,
+                    ) {
+                        Icon(Icons.Default.Speed, stringResource(R.string.points_per_kilometer))
+                    }
+                    IconToggleButton(
+                        checked = showRelativeValues,
+                        onCheckedChange = onShowRelativeValuesChange,
+                    ) {
+                        Icon(Icons.Default.CompareArrows, stringResource(R.string.use_relative_values))
+                    }
+                }
                 Text(
                     stringResource(R.string.route_details),
                     style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.align(Alignment.Center),
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 96.dp)
+                        .align(Alignment.Center),
                 )
+                IconToggleButton(
+                    checked = showPointNumbering,
+                    onCheckedChange = onShowPointNumberingChange,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                ) {
+                    Icon(Icons.Default.FormatListNumbered, stringResource(R.string.show_point_numbering))
+                }
             }
         }
         PrimaryScrollableTabRow(
@@ -305,7 +339,7 @@ fun RouteDetailsBottomSheet(
                                     },
                                 )
                             }
-                            val (distanceStatistics, scoreStatistics) = if (isSelected) {
+                            val (distanceStatistics, scoreStatistics) = if (isSelected || !showRelativeValues) {
                                 stringResource(
                                     R.string.distance_meters_format,
                                     candidate.totalDistanceMeters,
@@ -371,6 +405,7 @@ fun RouteDetailsBottomSheet(
         }
         RouteStepTable(
             route = selectedRoute,
+            showPointNumbering = showPointNumbering,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -819,6 +854,7 @@ private fun Modifier.minimumContentHeightPx(minimumHeightPx: () -> Float): Modif
 fun RouteStepTable(
     route: OptimizedRoute,
     modifier: Modifier = Modifier,
+    showPointNumbering: Boolean = true,
 ) {
     Column(modifier = modifier.testTag("routeStepTable")) {
         RouteTableRow(
@@ -828,6 +864,7 @@ fun RouteStepTable(
             score = stringResource(R.string.score_header),
             scoreTotal = stringResource(R.string.score_total_header),
             isHeader = true,
+            showPointNumbering = showPointNumbering,
         )
         HorizontalDivider()
         LazyColumn {
@@ -855,6 +892,7 @@ fun RouteStepTable(
                     },
                     scoreTotal = (segment?.accumulatedPoints ?: 0).toString(),
                     isHeader = false,
+                    showPointNumbering = showPointNumbering,
                 )
                 if (index < route.path.lastIndex) HorizontalDivider()
             }
@@ -870,6 +908,7 @@ private fun RouteTableRow(
     score: String,
     scoreTotal: String,
     isHeader: Boolean,
+    showPointNumbering: Boolean = true,
 ) {
     val style = if (isHeader) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium
     val weight = if (isHeader) FontWeight.SemiBold else FontWeight.Normal
@@ -878,7 +917,7 @@ private fun RouteTableRow(
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
-        RouteTableCell(sequence, 0.35f, style, weight)
+        if (showPointNumbering) RouteTableCell(sequence, 0.35f, style, weight)
         RouteTableCell(control, 1.15f, style, weight)
         RouteTableCell(distance, 0.9f, style, weight)
         RouteTableCell(score, 0.75f, style, weight)

@@ -186,6 +186,11 @@ internal fun RouteScreen(
         }
     }
     var showDetails by rememberSaveable { mutableStateOf(false) }
+    var detailsPointsPerKilometer by rememberSaveable(showPointsPerKilometer) {
+        mutableStateOf(showPointsPerKilometer)
+    }
+    var detailsRelativeValues by rememberSaveable { mutableStateOf(true) }
+    var detailsPointNumbering by rememberSaveable { mutableStateOf(true) }
     var routeDetailsPanelState by rememberSaveable {
         mutableStateOf(RouteDetailsPanelState.HALF)
     }
@@ -647,7 +652,12 @@ internal fun RouteScreen(
             nextLongestRouteCount = nextLongestRouteCount,
             routeMetadata = routeMetadata,
             selectedRouteId = selectedRouteId,
-            showPointsPerKilometer = showPointsPerKilometer,
+            showPointsPerKilometer = detailsPointsPerKilometer,
+            onShowPointsPerKilometerChange = { detailsPointsPerKilometer = it },
+            showRelativeValues = detailsRelativeValues,
+            onShowRelativeValuesChange = { detailsRelativeValues = it },
+            showPointNumbering = detailsPointNumbering,
+            onShowPointNumberingChange = { detailsPointNumbering = it },
             panelState = routeDetailsPanelState,
             onPanelStateChange = { routeDetailsPanelState = it },
             onRouteSelected = { newRouteId ->

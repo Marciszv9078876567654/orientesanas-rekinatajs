@@ -256,4 +256,7 @@
         <item quantity="one">Jāpārbauda %1$d kontrolpunkts. Kartē tas ir atzīmēts ar jautājuma zīmi.</item>
         <item quantity="other">Jāpārbauda %1$d kontrolpunkti. Kartē tie ir atzīmēti ar jautājuma zīmi.</item>
     </plurals>
+    <string name="absolute_values">Absolūtās vērtības</string>
+    <string name="relative_values">Relatīvās vērtības</string>
+    <string name="show_point_numbering">Rādīt punktu numerāciju</string>
 </resources>
