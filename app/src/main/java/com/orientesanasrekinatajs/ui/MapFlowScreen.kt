@@ -60,7 +60,6 @@ internal fun MapFlowScreen(
     processingState: MapProcessingUiState,
     routingState: RoutingUiState,
     defaultBudgetMeters: Float,
-    showPointsPerKilometer: Boolean,
     showUsageTips: Boolean,
     calibrationUsageTipsEnabled: Boolean,
     onUsageTipDismissed: () -> Unit,
@@ -343,7 +342,6 @@ internal fun MapFlowScreen(
             routeTargetScore = routingState.targetScore,
             routingError = routingState.error,
             defaultBudgetMeters = defaultBudgetMeters,
-            showPointsPerKilometer = showPointsPerKilometer,
             canCalculateRoute = effectivePixelsPerMeter != null,
             onCalculatePrimaryRoute = { mode, budget, targetScore ->
                 isDirty = true

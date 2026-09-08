@@ -121,7 +121,7 @@
     <string name="edit_route">Edit route</string>
     <string name="route_actions">Route actions</string>
     <string name="map_actions">Map actions</string>
-    <string name="route_points_per_kilometer_format">%1$.1f p/km</string>
+    <string name="route_points_per_kilometer_format">%1$.2f p/km</string>
     <string name="add_route_point">Add point</string>
     <string name="reverse_route">Reverse</string>
     <string name="save_route_edit_title">Save route changes?</string>

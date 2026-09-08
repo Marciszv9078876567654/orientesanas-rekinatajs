@@ -66,7 +66,6 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 language = enumPreference(preferences[LANG_KEY], LanguageConfig.SYSTEM),
                 useAnimations = preferences[ANIM_KEY] ?: true,
                 disableMapRotationGestures = preferences[MAP_ROTATION_GESTURES_KEY] ?: false,
-                showPointsPerKilometer = preferences[POINTS_PER_KM_KEY] ?: false,
                 showUsageTips = preferences[USAGE_TIPS_KEY] ?: true,
                 distanceUnit = enumPreference(preferences[UNIT_KEY], DistanceUnit.METRIC),
                 defaultDistanceBudgetKm = preferences[BUDGET_KEY] ?: 15.0f,
@@ -92,10 +91,6 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
      */
     suspend fun updateAnimations(enabled: Boolean) {
         dataStore.edit { it[ANIM_KEY] = enabled }
-    }
-
-    suspend fun updatePointsPerKilometer(enabled: Boolean) {
-        dataStore.edit { it[POINTS_PER_KM_KEY] = enabled }
     }
 
     suspend fun updateMapRotationGestures(enabled: Boolean) {
@@ -127,7 +122,6 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
         private val LANG_KEY = stringPreferencesKey("language_config")
         private val ANIM_KEY = booleanPreferencesKey("use_animations")
         private val MAP_ROTATION_GESTURES_KEY = booleanPreferencesKey("map_rotation_gestures")
-        private val POINTS_PER_KM_KEY = booleanPreferencesKey("show_points_per_kilometer")
         private val USAGE_TIPS_KEY = booleanPreferencesKey("show_usage_tips")
         private val UNIT_KEY = stringPreferencesKey("distance_unit")
         private val BUDGET_KEY = floatPreferencesKey("default_budget_km")

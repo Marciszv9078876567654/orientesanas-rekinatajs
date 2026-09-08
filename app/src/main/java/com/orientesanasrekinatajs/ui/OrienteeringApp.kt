@@ -120,7 +120,6 @@ fun OrienteeringApp(
     onUpdateLanguage: (LanguageConfig) -> Unit,
     onUpdateAnimations: (Boolean) -> Unit,
     onUpdateMapRotationGestures: (Boolean) -> Unit,
-    onUpdatePointsPerKilometer: (Boolean) -> Unit,
     onUpdateUsageTips: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -217,7 +216,6 @@ fun OrienteeringApp(
                     processingState = processingState,
                     routingState = routingState,
                     defaultBudgetMeters = userPreferences.defaultDistanceBudgetKm * 1_000f,
-                    showPointsPerKilometer = userPreferences.showPointsPerKilometer,
                     showUsageTips = userPreferences.showUsageTips &&
                         usageTipDismissedForUri != processingState.sourceUri?.toString(),
                     calibrationUsageTipsEnabled = userPreferences.showUsageTips,
@@ -276,7 +274,6 @@ fun OrienteeringApp(
             onUpdateLanguage = onUpdateLanguage,
             onUpdateAnimations = onUpdateAnimations,
             onUpdateMapRotationGestures = onUpdateMapRotationGestures,
-            onUpdatePointsPerKilometer = onUpdatePointsPerKilometer,
             onUpdateUsageTips = onUpdateUsageTips,
             onClearAllSavedMaps = onClearAllSavedMaps,
             hasSavedMaps = savedMapsState.maps.isNotEmpty(),

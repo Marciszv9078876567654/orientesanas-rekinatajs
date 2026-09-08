@@ -27,17 +27,6 @@ class PreferencesRepositoryTest {
     }
 
     @Test
-    fun pointsPerKilometerIsOffByDefaultAndCanBeEnabled() = runBlocking {
-        val repository = PreferencesRepository(FakeDataStore(mutablePreferencesOf()))
-
-        assertFalse(repository.userPreferencesFlow.first().showPointsPerKilometer)
-
-        repository.updatePointsPerKilometer(true)
-
-        assertEquals(true, repository.userPreferencesFlow.first().showPointsPerKilometer)
-    }
-
-    @Test
     fun mapRotationGesturesAreOnByDefaultAndCanBeDisabled() = runBlocking {
         val repository = PreferencesRepository(FakeDataStore(mutablePreferencesOf()))
 

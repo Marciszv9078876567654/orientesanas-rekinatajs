@@ -122,7 +122,7 @@
     <string name="edit_route">Labot maršrutu</string>
     <string name="route_actions">Maršruta darbības</string>
     <string name="map_actions">Kartes darbības</string>
-    <string name="route_points_per_kilometer_format">%1$.1f p/km</string>
+    <string name="route_points_per_kilometer_format">%1$.2f p/km</string>
     <string name="add_route_point">Pievienot punktu</string>
     <string name="reverse_route">Apgriezt</string>
     <string name="save_route_edit_title">Saglabāt maršruta izmaiņas?</string>

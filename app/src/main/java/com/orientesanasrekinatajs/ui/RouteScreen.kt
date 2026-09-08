@@ -130,7 +130,6 @@ internal fun RouteScreen(
     routeTargetScore: Int?,
     routingError: String?,
     defaultBudgetMeters: Float,
-    showPointsPerKilometer: Boolean,
     canCalculateRoute: Boolean,
     onCalculatePrimaryRoute: (RouteMode, Float?, Int?) -> Unit,
     isGeneratingAlternatives: Boolean,
@@ -186,8 +185,8 @@ internal fun RouteScreen(
         }
     }
     var showDetails by rememberSaveable { mutableStateOf(false) }
-    var detailsPointsPerKilometer by rememberSaveable(showPointsPerKilometer) {
-        mutableStateOf(showPointsPerKilometer)
+    var detailsPointsPerKilometer by rememberSaveable {
+        mutableStateOf(false)
     }
     var detailsRelativeValues by rememberSaveable { mutableStateOf(false) }
     var detailsPointNumbering by rememberSaveable { mutableStateOf(false) }

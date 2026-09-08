@@ -37,7 +37,6 @@ internal fun SettingsDialog(
     onUpdateLanguage: (LanguageConfig) -> Unit,
     onUpdateAnimations: (Boolean) -> Unit,
     onUpdateMapRotationGestures: (Boolean) -> Unit,
-    onUpdatePointsPerKilometer: (Boolean) -> Unit,
     onUpdateUsageTips: (Boolean) -> Unit,
     onClearAllSavedMaps: () -> Unit,
     hasSavedMaps: Boolean,
@@ -94,21 +93,6 @@ internal fun SettingsDialog(
                     Switch(
                         checked = preferences.disableMapRotationGestures,
                         onCheckedChange = onUpdateMapRotationGestures,
-                        modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        stringResource(R.string.points_per_kilometer),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    Switch(
-                        checked = preferences.showPointsPerKilometer,
-                        onCheckedChange = onUpdatePointsPerKilometer,
                         modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
                     )
                 }

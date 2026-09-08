@@ -39,10 +39,6 @@ class SettingsViewModel(
         viewModelScope.launch { preferencesRepository.updateAnimations(enabled) }
     }
 
-    fun updatePointsPerKilometer(enabled: Boolean) {
-        viewModelScope.launch { preferencesRepository.updatePointsPerKilometer(enabled) }
-    }
-
     fun updateMapRotationGestures(enabled: Boolean) {
         viewModelScope.launch { preferencesRepository.updateMapRotationGestures(enabled) }
     }
