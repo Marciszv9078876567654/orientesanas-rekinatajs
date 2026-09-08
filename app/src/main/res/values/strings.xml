@@ -1,4 +1,6 @@
 <resources>
+    <string name="copy_map">Kopēt karti</string>
+    <string name="map_copy_failed">Neizdevās kopēt karti.</string>
     <string name="app_name">Rogaininga Plānotājs</string>
     <string name="image_source_title">Skenēt orientēšanās karti</string>
     <string name="image_source_description">Izvēlieties skaidru, labi apgaismotu attēlu, kurā redzama visa karte.</string>
@@ -244,9 +246,9 @@
     <string name="map_export_failed">Karti neizdevās eksportēt.</string>
     <string name="map_import_failed">Izvēlētais fails nav derīga eksportēta karte.</string>
     <string name="calibrate_control_color">Kalibrēt pēc zināma kontrolpunkta</string>
-    <string name="calibrate_control_color_help">Pieskarieties viena vai vairāku skaidri redzamu kontrolpunktu apļu centriem. Īsi turiet oranžo atzīmi, pēc tam velciet, lai koriģētu tās vietu. Pilna punktu noteikšana sāksies tikai pēc “Apstiprināt” izvēles; “Atcelt” saglabās pašreizējos punktus.</string>
+    <string name="calibrate_control_color_help">Pieskarieties viena vai vairāku skaidri redzamu kontrolpunktu apļu centriem. Īsi turiet oranžo atzīmi, pēc tam velciet, lai koriģētu tās vietu. “Apstiprināt” aizstāj esošos kontrolpunktus ar no jauna noteiktajiem un saglabā attāluma kalibrēšanas līniju. “Atcelt” saglabā pašreizējos kontrolpunktus.</string>
     <string name="calibrate_control_color_warning_title">Aizstāt atrastos kontrolpunktus?</string>
-    <string name="calibrate_control_color_warning">Jaunās kalibrēšanas apstiprināšana var aizstāt visus esošos kontrolpunktus un notīrīs attāluma kalibrēšanas līniju. Vai turpināt?</string>
+    <string name="calibrate_control_color_warning">Jaunās kalibrēšanas apstiprināšana aizstāj visus esošos kontrolpunktus ar no jauna noteiktajiem. Attāluma kalibrēšanas līnija tiek saglabāta. Vai turpināt?</string>
     <string name="calibrate_control_color_failed">Kalibrēšana neizdevās</string>
     <string name="points_need_review_title">Jāpārbauda kontrolpunkti</string>
     <plurals name="points_need_review">

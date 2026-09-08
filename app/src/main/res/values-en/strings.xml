@@ -1,4 +1,6 @@
 <resources>
+    <string name="copy_map">Copy map</string>
+    <string name="map_copy_failed">The map could not be copied.</string>
     <string name="app_name">Rogaining Planner</string>
     <string name="image_source_title">Scan an orienteering map</string>
     <string name="image_source_description">Choose a clear, well-lit photo with the entire map visible.</string>
@@ -241,9 +243,9 @@
     <string name="map_export_failed">The map could not be exported.</string>
     <string name="map_import_failed">The selected file is not a valid exported map.</string>
     <string name="calibrate_control_color">Calibrate from a known control</string>
-    <string name="calibrate_control_color_help">Tap the centers of one or more clear control circles. Hold an orange marker briefly, then drag to adjust it. Full point detection starts only after Confirm; Cancel keeps the current points.</string>
+    <string name="calibrate_control_color_help">Tap the centers of one or more clear control circles. Hold an orange marker briefly, then drag to adjust it. Confirm replaces the existing controls with newly detected controls and keeps the distance calibration line. Cancel keeps the current controls.</string>
     <string name="calibrate_control_color_warning_title">Replace detected controls?</string>
-    <string name="calibrate_control_color_warning">Confirming a new calibration can replace all existing controls and will clear the distance calibration line. Continue?</string>
+    <string name="calibrate_control_color_warning">Confirming a new calibration replaces all existing controls with newly detected controls. The distance calibration line is kept. Continue?</string>
     <string name="calibrate_control_color_failed">Calibration failed</string>
     <string name="points_need_review_title">Control points need review</string>
     <plurals name="points_need_review">

@@ -63,7 +63,7 @@ class MapTransferRepository(
                     zip.write(manifest)
                     zip.closeEntry()
                     zip.putNextEntry(ZipEntry(MAP_IMAGE_ENTRY))
-                    check(draft.bitmap.compress(Bitmap.CompressFormat.PNG, 100, zip)) {
+                    check(draft.bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 90, zip)) {
                         "Could not encode the map image"
                     }
                     zip.closeEntry()
@@ -307,7 +307,7 @@ class MapTransferRepository(
                     val entry = zip.nextEntry ?: break
                     when (entry.name) {
                         MANIFEST_ENTRY -> manifestBytes = zip.readEntryLimited(MAX_MANIFEST_BYTES)
-                        MAP_IMAGE_ENTRY -> imageBytes = zip.readEntryLimited(MAX_IMAGE_BYTES)
+                        MAP_IMAGE_ENTRY, LEGACY_MAP_IMAGE_ENTRY -> imageBytes = zip.readEntryLimited(MAX_IMAGE_BYTES)
                     }
                     zip.closeEntry()
                 }
@@ -523,7 +523,8 @@ class MapTransferRepository(
         private const val FORMAT_NAME = "orienteering-map"
         private const val FORMAT_VERSION = 1
         private const val MANIFEST_ENTRY = "manifest.json"
-        private const val MAP_IMAGE_ENTRY = "map.png"
+        private const val MAP_IMAGE_ENTRY = "map.webp"
+        private const val LEGACY_MAP_IMAGE_ENTRY = "map.png"
         private const val MAX_MANIFEST_BYTES = 2 * 1024 * 1024
         private const val MAX_IMAGE_BYTES = 64 * 1024 * 1024
 

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DeleteForever
@@ -442,7 +443,11 @@ internal fun EditMapScreen(
                         onClick = { confirmCalibrationStart = true },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     ) {
-                        Text(stringResource(R.string.calibrate_control_color))
+                        Icon(Icons.Default.Colorize, contentDescription = null)
+                        Text(
+                            stringResource(R.string.calibrate_control_color),
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),

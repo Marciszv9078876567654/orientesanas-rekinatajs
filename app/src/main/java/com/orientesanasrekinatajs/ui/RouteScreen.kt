@@ -856,7 +856,7 @@ internal fun RouteScreen(
 }
 
 @Composable
-private fun MapDropdownContent(content: @Composable () -> Unit) {
+internal fun MapDropdownContent(content: @Composable () -> Unit) {
     val animationsEnabled = LocalAnimationsEnabled.current
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -884,6 +884,7 @@ private fun RouteGenerationDialog(
 ) {
     val focusManager = LocalFocusManager.current
     var mode by rememberSaveable(initialMode) { mutableStateOf(initialMode) }
+    var emptyRouteSelected by rememberSaveable { mutableStateOf(false) }
     var budgetText by rememberSaveable(initialBudgetMeters) { mutableStateOf(initialBudgetMeters.toString()) }
     var targetScoreText by rememberSaveable(initialTargetScore) { mutableStateOf(initialTargetScore.toString()) }
     val budget = budgetText.localizedFloatOrNull()
@@ -911,8 +912,8 @@ private fun RouteGenerationDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                     RouteMode.entries.forEach { option ->
                         FilterChip(
-                            selected = mode == option,
-                            onClick = { mode = option },
+                            selected = !emptyRouteSelected && mode == option,
+                            onClick = { mode = option; emptyRouteSelected = false },
                             enabled = !isCalculating,
                             label = {
                                 Text(
@@ -925,8 +926,8 @@ private fun RouteGenerationDialog(
                         )
                     }
                     FilterChip(
-                        selected = false,
-                        onClick = onCreateEmpty,
+                        selected = emptyRouteSelected,
+                        onClick = { emptyRouteSelected = true },
                         enabled = !isCalculating,
                         label = {
                             Text(
@@ -938,7 +939,7 @@ private fun RouteGenerationDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                if (mode == RouteMode.BEST_SCORE) {
+                if (!emptyRouteSelected && mode == RouteMode.BEST_SCORE) {
                     OutlinedTextField(
                         value = budgetText,
                         onValueChange = { budgetText = it },
@@ -949,7 +950,7 @@ private fun RouteGenerationDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                if (mode == RouteMode.TARGET_SCORE) {
+                if (!emptyRouteSelected && mode == RouteMode.TARGET_SCORE) {
                     OutlinedTextField(
                         value = targetScoreText,
                         onValueChange = { targetScoreText = it.filter(Char::isDigit).take(5) },
@@ -978,13 +979,13 @@ private fun RouteGenerationDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onGenerate(
+                    if (emptyRouteSelected) onCreateEmpty() else onGenerate(
                         mode,
                         budget.takeIf { mode == RouteMode.BEST_SCORE },
                         targetScore.takeIf { mode == RouteMode.TARGET_SCORE },
                     )
                 },
-                enabled = canCalculate && parametersValid && !isCalculating,
+                enabled = (emptyRouteSelected || (canCalculate && parametersValid)) && !isCalculating,
             ) {
                 if (isCalculating) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)

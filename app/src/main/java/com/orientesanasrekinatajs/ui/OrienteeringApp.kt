@@ -111,6 +111,7 @@ fun OrienteeringApp(
     onLoadSavedMap: (String) -> Unit,
     onRenameSavedMap: (String, String, (ScannedMapEntity) -> Unit) -> Unit,
     onDeleteSavedMap: (String, () -> Unit) -> Unit,
+    onCopySavedMap: (String, String) -> Unit,
     onClearAllSavedMaps: () -> Unit,
     onDismissSavedMapsEvent: () -> Unit,
     onDismissMapTransferEvent: () -> Unit,
@@ -286,6 +287,9 @@ fun OrienteeringApp(
         RecentMapsDialog(
             maps = savedMapsState.maps,
             onOpen = { id -> showRecentMaps = false; onLoadSavedMap(id) },
+            onRename = { id, name -> onRenameSavedMap(id, name) {} },
+            onDelete = { id -> onDeleteSavedMap(id) {} },
+            onCopy = onCopySavedMap,
             onDismiss = { showRecentMaps = false },
         )
     }
@@ -306,6 +310,7 @@ fun OrienteeringApp(
                     SavedMapsEvent.SAVE_FAILED -> R.string.map_save_failed
                     SavedMapsEvent.LOAD_FAILED -> R.string.map_load_failed
                     SavedMapsEvent.RENAME_FAILED -> R.string.map_rename_failed
+                    SavedMapsEvent.COPY_FAILED -> R.string.map_copy_failed
                     SavedMapsEvent.DELETE_FAILED -> R.string.map_delete_failed
                     SavedMapsEvent.CLEAR_FAILED -> R.string.maps_clear_failed
                 },

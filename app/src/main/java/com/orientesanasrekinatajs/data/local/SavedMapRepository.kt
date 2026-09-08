@@ -82,7 +82,7 @@ class SavedMapRepository(
         val previous = draft.existingId?.let { dao.getMap(it) }
         val mapId = previous?.id ?: UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
-        val imageFile = File(mapsDirectory, "$mapId-$timestamp.png")
+        val imageFile = File(mapsDirectory, "$mapId-$timestamp.webp")
         val persistedPoints = draft.points.map { point ->
             point to ControlPointEntity(
                 id = UUID.randomUUID().toString(),
@@ -162,7 +162,7 @@ class SavedMapRepository(
         )
         try {
             imageFile.outputStream().buffered().use { output ->
-                check(draft.bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                check(draft.bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 90, output)) {
                     "Could not save the map image"
                 }
             }
@@ -296,6 +296,45 @@ class SavedMapRepository(
         val map = dao.getMap(id) ?: return@withContext
         dao.deleteMap(id)
         File(map.imageFilePath).delete()
+    }
+
+    suspend fun copy(id: String, name: String): ScannedMapEntity = withContext(ioDispatcher) {
+        val original = requireNotNull(dao.getMapWithPoints(id)) { "Saved map not found" }
+        val newId = UUID.randomUUID().toString()
+        val imageFile = File(mapsDirectory, "$newId.${File(original.map.imageFilePath).extension}")
+        val pointIds = original.points.associate { it.id to UUID.randomUUID().toString() }
+        fun remapRoute(value: String) = value.split(';').joinToString(";") { route ->
+            route.split(',').joinToString(",") { pointIds[it] ?: it }
+        }
+        val metadata = JSONObject(original.map.routeMetadataJson)
+        metadata.optJSONArray(ROUTE_RESTRICTIONS_JSON_KEY)?.let { restrictions ->
+            for (index in 0 until restrictions.length()) {
+                val restriction = restrictions.getJSONObject(index)
+                for (key in listOf("firstPointId", "secondPointId")) {
+                    pointIds[restriction.optString(key)]?.let { restriction.put(key, it) }
+                }
+            }
+        }
+        val copied = original.map.copy(
+            id = newId,
+            name = name.trim().ifEmpty { original.map.name },
+            timestamp = System.currentTimeMillis(),
+            imageFilePath = imageFile.absolutePath,
+            routePointIds = remapRoute(original.map.routePointIds),
+            selectedRoutePointIds = remapRoute(original.map.selectedRoutePointIds),
+            alternativeRoutePointIds = remapRoute(original.map.alternativeRoutePointIds),
+            routeMetadataJson = metadata.toString(),
+        )
+        try {
+            File(original.map.imageFilePath).copyTo(imageFile)
+            dao.replaceMapWithPoints(copied, original.points.map {
+                it.copy(id = pointIds.getValue(it.id), mapId = newId)
+            })
+            copied
+        } catch (error: Throwable) {
+            imageFile.delete()
+            throw error
+        }
     }
 
     suspend fun clearAll() = withContext(ioDispatcher) {

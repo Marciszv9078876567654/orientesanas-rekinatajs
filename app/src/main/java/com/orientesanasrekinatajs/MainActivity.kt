@@ -164,11 +164,14 @@ class MainActivity : AppCompatActivity() {
                     },
                     onRenameSavedMap = { id, name, onRenamed ->
                         savedMapsViewModel.rename(id, name) { renamed ->
-                            mapProcessingViewModel.renameSavedMap(renamed.name)
+                            if (mapProcessingViewModel.uiState.value.savedMapId == id) {
+                                mapProcessingViewModel.renameSavedMap(renamed.name)
+                            }
                             onRenamed(renamed)
                         }
                     },
                     onDeleteSavedMap = savedMapsViewModel::delete,
+                    onCopySavedMap = savedMapsViewModel::copy,
                     onClearAllSavedMaps = savedMapsViewModel::clearAll,
                     onDismissSavedMapsEvent = savedMapsViewModel::clearEvent,
                     onDismissMapTransferEvent = mapTransferViewModel::clearEvent,

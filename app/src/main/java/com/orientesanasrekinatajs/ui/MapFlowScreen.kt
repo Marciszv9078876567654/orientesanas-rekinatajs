@@ -363,6 +363,9 @@ internal fun MapFlowScreen(
             routeRestrictions = routingState.routeRestrictions,
             onManageRoutes = { action ->
                 isDirty = true
+                if (action is RouteManagementAction.CreateEmpty) {
+                    awaitingRouteGeneration = false
+                }
                 onManageRoutes(action)
             },
             onManageRouteRestrictions = { action ->

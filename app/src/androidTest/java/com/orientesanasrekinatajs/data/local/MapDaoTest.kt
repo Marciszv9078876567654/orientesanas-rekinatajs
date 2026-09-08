@@ -242,6 +242,47 @@ class MapDaoTest {
         }
     }
 
+    @Test
+    fun copyingMapPreservesContentAndSurvivesDeletingOriginal() = runBlocking {
+        mapsDirectory.mkdirs()
+        val image = File(mapsDirectory, "original.png")
+        val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        image.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        val original = testMap().copy(
+            imageFilePath = image.absolutePath,
+            routePointIds = "point-1",
+            selectedRoutePointIds = "point-1",
+            alternativeRoutePointIds = "point-1;point-1",
+            routeMetadataJson = """{"route":{"name":"Forest"},"__routeRestrictions":[{"firstPointId":"point-1","secondPointId":"point-1"}]}""",
+        )
+        database.mapDao().insertMapWithPoints(original, listOf(testPoint(original.id)))
+        val repository = SavedMapRepository(mapsDirectory, database.mapDao())
+
+        val copied = repository.copy(original.id, "Forest copy")
+        val stored = requireNotNull(database.mapDao().getMapWithPoints(copied.id))
+        val point = stored.points.single()
+        assertTrue(copied.id != original.id)
+        assertTrue(point.id != "point-1")
+        assertEquals(copied.id, point.mapId)
+        assertEquals("Forest copy", copied.name)
+        assertEquals(original.pixelsPerMeter, copied.pixelsPerMeter)
+        assertEquals(point.id, copied.routePointIds)
+        assertEquals(point.id, copied.selectedRoutePointIds)
+        assertEquals("${point.id};${point.id}", copied.alternativeRoutePointIds)
+        val metadata = org.json.JSONObject(copied.routeMetadataJson)
+        assertEquals("Forest", metadata.getJSONObject("route").getString("name"))
+        val restriction = metadata.getJSONArray("__routeRestrictions").getJSONObject(0)
+        assertEquals(point.id, restriction.getString("firstPointId"))
+        assertEquals(point.id, restriction.getString("secondPointId"))
+        assertEquals(original, database.mapDao().getMap(original.id))
+        assertTrue(image.readBytes().contentEquals(File(copied.imageFilePath).readBytes()))
+
+        repository.delete(original.id)
+        assertTrue(File(copied.imageFilePath).exists())
+        assertEquals(listOf(point), database.mapDao().getMapWithPoints(copied.id)?.points)
+    }
+
     private fun testMap() = ScannedMapEntity(
         id = "map-1",
         timestamp = 1L,

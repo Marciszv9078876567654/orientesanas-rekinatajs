@@ -74,8 +74,7 @@ fun InteractiveCornerCanvas(
     val latestRotationOffset by rememberUpdatedState(rotationOffsetDegrees)
     val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
     val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
-    val lineColor = Color(0xFFFFC107)
-    val handleColor = Color(0xFFE91E63)
+    val boundaryColor = Color(0xFF00C853)
     val animatedRotation = rotationQuarterTurns * 90f
     val animatedFitQuarterTurns = animatedFitQuarterTurns(rotationQuarterTurns)
     val animationsEnabled = LocalAnimationsEnabled.current
@@ -182,7 +181,7 @@ fun InteractiveCornerCanvas(
             corners.drop(1).forEach { lineTo(it.x, it.y) }
             close()
         }
-        drawMapLinePath(borderPath, lineColor, DEFAULT_ROUTE_STROKE_WIDTH, pointScale)
+        drawMapLinePath(borderPath, boundaryColor, DEFAULT_ROUTE_STROKE_WIDTH, pointScale)
         corners.forEach { corner ->
             drawCircle(
                 Color.Black.copy(alpha = CONTROL_SHADOW_ALPHA),
@@ -190,7 +189,7 @@ fun InteractiveCornerCanvas(
                 center = corner,
             )
             drawCircle(Color.White, radius = CONTROL_POINT_OUTER_RADIUS_PX * pointScale, center = corner)
-            drawCircle(handleColor, radius = 9f * pointScale, center = corner)
+            drawCircle(boundaryColor, radius = 9f * pointScale, center = corner)
         }
     }
 }

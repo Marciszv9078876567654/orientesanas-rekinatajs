@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 enum class SavedMapsEvent {
-    SAVED, DELETED, CLEARED, SAVE_FAILED, LOAD_FAILED, RENAME_FAILED, DELETE_FAILED, CLEAR_FAILED,
+    SAVED, DELETED, CLEARED, SAVE_FAILED, LOAD_FAILED, RENAME_FAILED, DELETE_FAILED, CLEAR_FAILED, COPY_FAILED,
 }
 
 data class SavedMapsUiState(
@@ -77,6 +77,13 @@ class SavedMapsViewModel(private val repository: SavedMapRepository) : ViewModel
             runCatching { repository.clearAll() }
                 .onSuccess { _uiState.value = _uiState.value.copy(event = SavedMapsEvent.CLEARED) }
                 .onFailure { _uiState.value = _uiState.value.copy(event = SavedMapsEvent.CLEAR_FAILED) }
+        }
+    }
+
+    fun copy(id: String, name: String) {
+        viewModelScope.launch {
+            runCatching { repository.copy(id, name) }
+                .onFailure { _uiState.value = _uiState.value.copy(event = SavedMapsEvent.COPY_FAILED) }
         }
     }
 
