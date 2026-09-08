@@ -189,8 +189,8 @@ internal fun RouteScreen(
     var detailsPointsPerKilometer by rememberSaveable(showPointsPerKilometer) {
         mutableStateOf(showPointsPerKilometer)
     }
-    var detailsRelativeValues by rememberSaveable { mutableStateOf(true) }
-    var detailsPointNumbering by rememberSaveable { mutableStateOf(true) }
+    var detailsRelativeValues by rememberSaveable { mutableStateOf(false) }
+    var detailsPointNumbering by rememberSaveable { mutableStateOf(false) }
     var routeDetailsPanelState by rememberSaveable {
         mutableStateOf(RouteDetailsPanelState.HALF)
     }
@@ -444,6 +444,7 @@ internal fun RouteScreen(
         }
         Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
             RouteRenderingCanvas(
+                showPointNumbering = detailsPointNumbering,
                 bitmap = bitmap,
                 route = routeEditorPath ?: displayedRoute?.path.orEmpty(),
                 routeLayers = if (selectableRoutes.isEmpty()) emptyList() else availableRoutes.mapNotNull { candidate ->

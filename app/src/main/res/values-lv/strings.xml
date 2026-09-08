@@ -242,5 +242,5 @@
     </plurals>
     <string name="absolute_values">Absolūtās vērtības</string>
     <string name="relative_values">Relatīvās vērtības</string>
-    <string name="show_point_numbering">Rādīt punktu numerāciju</string>
+    <string name="show_point_numbering">Rādīt punktu apmeklēšanas secību kartē</string>
 </resources>

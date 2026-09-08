@@ -215,6 +215,7 @@ fun RouteRenderingCanvas(
     onRotationGesture: (Float) -> Unit = {},
     recenterKey: Int = 0,
     routeLayers: List<RouteRenderLayer>? = null,
+    showPointNumbering: Boolean = false,
     onMapTap: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -392,6 +393,13 @@ fun RouteRenderingCanvas(
         }
         drawReferencePoints(
             points = allPoints,
+            visitOrderLabels = if (showPointNumbering) {
+                val numberedRoute = effectiveLayers.firstOrNull { it.id == isolatedRouteId }?.points
+                    ?: activeRoute
+                routeVisitOrderLabels(numberedRoute)
+            } else {
+                emptyMap()
+            },
             viewport = viewport,
             zoom = zoom,
             useTypeColors = true,
@@ -933,6 +941,7 @@ private fun DrawScope.drawReferencePoints(
     useTypeColors: Boolean,
     mutedPointIds: Set<String> = emptySet(),
     highlightedPointColors: Map<String, Color> = emptyMap(),
+    visitOrderLabels: Map<String, String> = emptyMap(),
     pointAlpha: (ControlPoint) -> Float = { 1f },
 ) {
     val pointScale = controlMarkerScale(zoom)
@@ -1008,7 +1017,8 @@ private fun DrawScope.drawReferencePoints(
             ControlPointType.START -> "S"
             ControlPointType.FINISH -> "F"
             ControlPointType.START_FINISH -> "S/F"
-            ControlPointType.CONTROL -> if (point.needsReview) "?" else point.code.toString()
+            ControlPointType.CONTROL -> if (point.needsReview) "?"
+                else visitOrderLabels[point.id]?.let { "${point.code} ($it)" } ?: point.code.toString()
         }
         labelPaint.color = markerColor.toArgb()
         labelPaint.alpha = ((if (isMuted) 125 else 255) * visibilityAlpha).toInt()

@@ -254,5 +254,5 @@
     </plurals>
     <string name="absolute_values">Absolute</string>
     <string name="relative_values">Relative</string>
-    <string name="show_point_numbering">Show point numbering</string>
+    <string name="show_point_numbering">Show collection order on map</string>
 </resources>
