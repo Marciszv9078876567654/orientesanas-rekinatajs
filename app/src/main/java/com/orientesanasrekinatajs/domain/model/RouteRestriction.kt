@@ -19,3 +19,14 @@ data class RouteRestriction(
     val pointIds: Set<String>
         get() = setOfNotNull(firstPointId, secondPointId)
 }
+
+/** Each route endpoint has one neighbour; controls and a shared start/finish have two. */
+internal val ControlPoint.mandatoryConnectionLimit: Int
+    get() = when (type) {
+        ControlPointType.START, ControlPointType.FINISH -> 1
+        ControlPointType.CONTROL, ControlPointType.START_FINISH -> 2
+    }
+
+internal fun mandatoryConnectionCounts(restrictions: List<RouteRestriction>): Map<String, Int> =
+    restrictions.filter { it.type == RouteRestrictionType.MANDATORY_CONNECTION }
+        .flatMap { it.pointIds }.groupingBy { it }.eachCount()

@@ -21,6 +21,7 @@ data class UserPreferences(
     val themeConfig: ThemeConfig = ThemeConfig.SYSTEM,
     val language: LanguageConfig = LanguageConfig.SYSTEM,
     val useAnimations: Boolean = true,
+    val vibrationFeedback: Boolean = true,
     val disableMapRotationGestures: Boolean = false,
     val showUsageTips: Boolean = true,
     val distanceUnit: DistanceUnit = DistanceUnit.METRIC,

@@ -45,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.orientesanasrekinatajs.ui.theme.LocalLongPressFeedback
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.data.local.entity.ScannedMapEntity
 import java.text.DateFormat
@@ -59,6 +60,7 @@ internal fun RecentMapsDialog(
     onCopy: (String, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val longPressFeedback = LocalLongPressFeedback.current
     var menuMapId by rememberSaveable { mutableStateOf<String?>(null) }
     var renameMapId by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteMapId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -108,7 +110,8 @@ internal fun RecentMapsDialog(
                                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).combinedClickable(
                                         role = Role.Button,
                                         onClick = { onOpen(map.id) },
-                                        onLongClick = { menuMapId = map.id },
+                                        onLongClick = { longPressFeedback(); menuMapId = map.id },
+                                        hapticFeedbackEnabled = false,
                                     ),
                                 ) {
                                     Text(

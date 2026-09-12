@@ -65,6 +65,7 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
                 themeConfig = enumPreference(preferences[THEME_KEY], ThemeConfig.SYSTEM),
                 language = enumPreference(preferences[LANG_KEY], LanguageConfig.SYSTEM),
                 useAnimations = preferences[ANIM_KEY] ?: true,
+                vibrationFeedback = preferences[VIBRATION_KEY] ?: true,
                 disableMapRotationGestures = preferences[MAP_ROTATION_GESTURES_KEY] ?: false,
                 showUsageTips = preferences[USAGE_TIPS_KEY] ?: true,
                 distanceUnit = enumPreference(preferences[UNIT_KEY], DistanceUnit.METRIC),
@@ -97,6 +98,10 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
         dataStore.edit { it[MAP_ROTATION_GESTURES_KEY] = enabled }
     }
 
+    suspend fun updateVibrationFeedback(enabled: Boolean) {
+        dataStore.edit { it[VIBRATION_KEY] = enabled }
+    }
+
     suspend fun updateUsageTips(enabled: Boolean) {
         dataStore.edit { it[USAGE_TIPS_KEY] = enabled }
     }
@@ -120,6 +125,7 @@ class PreferencesRepository(private val dataStore: DataStore<Preferences>) {
         // DataStore preference keys.
         private val THEME_KEY = stringPreferencesKey("theme_config")
         private val LANG_KEY = stringPreferencesKey("language_config")
+        private val VIBRATION_KEY = booleanPreferencesKey("vibration_feedback")
         private val ANIM_KEY = booleanPreferencesKey("use_animations")
         private val MAP_ROTATION_GESTURES_KEY = booleanPreferencesKey("map_rotation_gestures")
         private val USAGE_TIPS_KEY = booleanPreferencesKey("show_usage_tips")

@@ -100,7 +100,7 @@ class Phase8ViewModelTest {
     }
 
     @Test
-    fun mapProcessing_manualAddAndEditClearReviewFlag() {
+    fun mapProcessing_preservesEditorReviewDecisionWhenAddingAndEditing() {
         val viewModel = MapProcessingViewModel(
             FakeProcessingEngine(ocrResults = listOf(null)),
             Dispatchers.Unconfined,
@@ -109,15 +109,19 @@ class Phase8ViewModelTest {
         val flagged = viewModel.uiState.value.controlPoints.single { it.type == ControlPointType.CONTROL }
 
         onMainThread {
-            viewModel.updateControlPoint(flagged.copy(code = 72, points = 7))
+            viewModel.updateControlPoint(flagged.copy(code = 72, points = 7, needsReview = false))
             viewModel.addControlPoint(
-                ControlPoint(code = 83, center = Point2D(70f, 70f), needsReview = true),
+                ControlPoint(id = "duplicate", code = 72, center = Point2D(70f, 70f), needsReview = true),
             )
         }
 
         val points = viewModel.uiState.value.controlPoints
         assertTrue(!points.single { it.id == flagged.id }.needsReview)
-        assertTrue(!points.single { it.code == 83 }.needsReview)
+        assertTrue(points.single { it.id == "duplicate" }.needsReview)
+        onMainThread {
+            viewModel.updateControlPoint(flagged.copy(code = 72, points = 7, needsReview = true))
+        }
+        assertTrue(viewModel.uiState.value.controlPoints.single { it.id == flagged.id }.needsReview)
     }
 
     @Test
@@ -469,6 +473,43 @@ class Phase8ViewModelTest {
             viewModel.manageRouteRestrictions(RouteRestrictionAction.DeleteAllUnstarred)
         }
         assertTrue(viewModel.uiState.value.routeRestrictions.isEmpty())
+    }
+
+    @Test
+    fun routing_mandatoryConnectionLimitsMatchEveryPointType() {
+        ControlPointType.entries.forEach { type ->
+            val focal = ControlPoint("focal", 45, 4, Point2D(0f, 0f), type)
+            val controls = (1..3).map {
+                ControlPoint("c$it", 50 + it, 5, Point2D(it.toFloat(), 0f), ControlPointType.CONTROL)
+            }
+            val points = buildList {
+                if (type != ControlPointType.START_FINISH && type != ControlPointType.START) {
+                    add(ControlPoint("start", 0, 0, Point2D(-1f, 0f), ControlPointType.START))
+                }
+                add(focal)
+                addAll(controls)
+                if (type != ControlPointType.START_FINISH && type != ControlPointType.FINISH) {
+                    add(ControlPoint("finish", 0, 0, Point2D(4f, 0f), ControlPointType.FINISH))
+                }
+            }
+            val limit = if (type == ControlPointType.START || type == ControlPointType.FINISH) 1 else 2
+            val rules = controls.map {
+                RouteRestriction(RouteRestrictionType.MANDATORY_CONNECTION, focal.id, it.id)
+            }
+            val model = RoutingViewModel(Dispatchers.Unconfined)
+            onMainThread {
+                model.openSavedRestrictions(rules.take(limit))
+                model.calculateRoute(points, 1f, RouteMode.SHORTEST)
+            }
+            assertEquals("$type at its limit: ${model.uiState.value.error}", null, model.uiState.value.error)
+            assertNotNull(model.uiState.value.route)
+            onMainThread {
+                model.openSavedRestrictions(rules.take(limit + 1))
+                model.calculateRoute(points, 1f, RouteMode.SHORTEST)
+            }
+            assertTrue("$type must reject excess connections: ${model.uiState.value.error}",
+                model.uiState.value.error.orEmpty().contains("at most $limit mandatory"))
+        }
     }
 
     @Test

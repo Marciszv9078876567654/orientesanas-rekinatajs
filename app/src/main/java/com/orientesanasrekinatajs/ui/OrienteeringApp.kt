@@ -120,6 +120,7 @@ fun OrienteeringApp(
     onUpdateLanguage: (LanguageConfig) -> Unit,
     onUpdateAnimations: (Boolean) -> Unit,
     onUpdateMapRotationGestures: (Boolean) -> Unit,
+    onUpdateVibrationFeedback: (Boolean) -> Unit,
     onUpdateUsageTips: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -274,6 +275,7 @@ fun OrienteeringApp(
             onUpdateLanguage = onUpdateLanguage,
             onUpdateAnimations = onUpdateAnimations,
             onUpdateMapRotationGestures = onUpdateMapRotationGestures,
+            onUpdateVibrationFeedback = onUpdateVibrationFeedback,
             onUpdateUsageTips = onUpdateUsageTips,
             onClearAllSavedMaps = onClearAllSavedMaps,
             hasSavedMaps = savedMapsState.maps.isNotEmpty(),

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import com.orientesanasrekinatajs.ui.theme.LocalLongPressFeedback
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -221,6 +222,7 @@ fun RouteRenderingCanvas(
 ) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     val animationsEnabled = LocalAnimationsEnabled.current
+    val latestLongPressFeedback by rememberUpdatedState(LocalLongPressFeedback.current)
     val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
     val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
     val effectiveLayers = routeLayers ?: run {
@@ -297,6 +299,7 @@ fun RouteRenderingCanvas(
                         )
                         isolatedRouteId = routeAtPosition(position, latestLayers, viewport)
                         isolationHeld = isolatedRouteId != null
+                        if (isolationHeld) latestLongPressFeedback()
                     },
                 )
             }
@@ -661,6 +664,7 @@ fun InteractiveControlPointCanvas(
     val latestOnPointSelected by rememberUpdatedState(onPointSelected)
     val latestOnEmptyPointSelected by rememberUpdatedState(onEmptyPointSelected)
     val latestRotationOffset by rememberUpdatedState(rotationOffsetDegrees)
+    val latestLongPressFeedback by rememberUpdatedState(LocalLongPressFeedback.current)
     val latestRotationGesturesEnabled by rememberUpdatedState(rotationGesturesEnabled)
     val latestOnRotationGesture by rememberUpdatedState(onRotationGesture)
     var zoom by remember { mutableStateOf(1f) }
@@ -727,9 +731,19 @@ fun InteractiveControlPointCanvas(
                     var moved = 0f
                     var usedMultiTouch = false
                     var lastPosition = down.position
+                    var lastEventTime = down.uptimeMillis
 
                     while (true) {
-                        val event = awaitPointerEvent()
+                        val event = if (selectedId != null && !dragHold.activated && !dragHold.cancelled) {
+                            withTimeoutOrNull((MarkerDragHold.HOLD_DURATION_MS - (lastEventTime - down.uptimeMillis)).coerceAtLeast(1L)) {
+                                awaitPointerEvent()
+                            } ?: run {
+                                dragHold.update(down.uptimeMillis + MarkerDragHold.HOLD_DURATION_MS, lastPosition)
+                                latestLongPressFeedback()
+                                continue
+                            }
+                        } else awaitPointerEvent()
+                        lastEventTime = event.changes.firstOrNull()?.uptimeMillis ?: lastEventTime
                         if (event.changes.size > 1) {
                             usedMultiTouch = true
                             selectedId = null
@@ -754,7 +768,9 @@ fun InteractiveControlPointCanvas(
                                     val delta = change.position - change.previousPosition
                                     moved += delta.getDistance()
                                     val selected = latestPoints.firstOrNull { it.id == selectedId }
+                                    val wasActivated = dragHold.activated
                                     if (selected != null && dragHold.update(change.uptimeMillis, change.position)) {
+                                        if (!wasActivated) latestLongPressFeedback()
                                         val viewport = viewportTransform(
                                             size, bitmap.width, bitmap.height,
                                             rotationQuarterTurns, zoom, pan,

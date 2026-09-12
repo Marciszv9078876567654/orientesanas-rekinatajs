@@ -42,6 +42,8 @@ import com.orientesanasrekinatajs.domain.model.ControlPoint
 import com.orientesanasrekinatajs.domain.model.ControlPointType
 import com.orientesanasrekinatajs.domain.model.RouteRestriction
 import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
+import com.orientesanasrekinatajs.domain.model.mandatoryConnectionLimit
+import com.orientesanasrekinatajs.domain.model.mandatoryConnectionCounts
 import com.orientesanasrekinatajs.ui.routing.RouteRestrictionAction
 
 @Composable
@@ -135,6 +137,7 @@ internal fun RouteRestrictionsDialog(
     if (showAddRestriction) {
         AddRouteRestrictionDialog(
             points = points,
+            restrictions = restrictions,
             onAdd = { restriction ->
                 onAction(RouteRestrictionAction.Add(restriction))
                 showAddRestriction = false
@@ -169,8 +172,9 @@ internal fun RouteRestrictionsDialog(
 }
 
 @Composable
-private fun AddRouteRestrictionDialog(
+internal fun AddRouteRestrictionDialog(
     points: List<ControlPoint>,
+    restrictions: List<RouteRestriction>,
     onAdd: (RouteRestriction) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -191,6 +195,13 @@ private fun AddRouteRestrictionDialog(
     )
     val valid = firstPointId.isNotBlank() && (!needsSecondPoint ||
         secondPointId.isNotBlank() && secondPointId != firstPointId)
+    val connectionCounts = mandatoryConnectionCounts(restrictions)
+    val overLimitPoint = if (valid && type == RouteRestrictionType.MANDATORY_CONNECTION) {
+        points.firstOrNull {
+            it.id in setOf(firstPointId, secondPointId) &&
+                (connectionCounts[it.id] ?: 0) >= it.mandatoryConnectionLimit
+        }
+    } else null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -236,6 +247,17 @@ private fun AddRouteRestrictionDialog(
                         onSelected = { secondPointId = it },
                     )
                 }
+                overLimitPoint?.let { point ->
+                    Text(
+                        stringResource(
+                            R.string.mandatory_connection_limit,
+                            restrictionPointLabel(point),
+                            point.mandatoryConnectionLimit,
+                        ),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         },
         confirmButton = {
@@ -249,7 +271,7 @@ private fun AddRouteRestrictionDialog(
                         ),
                     )
                 },
-                enabled = valid,
+                enabled = valid && overLimitPoint == null,
             ) { Text(stringResource(R.string.add)) }
         },
         dismissButton = {

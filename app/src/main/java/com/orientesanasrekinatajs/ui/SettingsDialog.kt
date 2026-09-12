@@ -1,5 +1,7 @@
 package com.orientesanasrekinatajs.ui
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +39,7 @@ internal fun SettingsDialog(
     onUpdateLanguage: (LanguageConfig) -> Unit,
     onUpdateAnimations: (Boolean) -> Unit,
     onUpdateMapRotationGestures: (Boolean) -> Unit,
+    onUpdateVibrationFeedback: (Boolean) -> Unit,
     onUpdateUsageTips: (Boolean) -> Unit,
     onClearAllSavedMaps: () -> Unit,
     hasSavedMaps: Boolean,
@@ -46,7 +49,7 @@ internal fun SettingsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = stringResource(R.string.settings),
                     style = MaterialTheme.typography.headlineSmall,
@@ -105,6 +108,18 @@ internal fun SettingsDialog(
                     Switch(
                         checked = preferences.showUsageTips,
                         onCheckedChange = onUpdateUsageTips,
+                        modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(stringResource(R.string.vibration_feedback), style = MaterialTheme.typography.labelLarge)
+                    Switch(
+                        checked = preferences.vibrationFeedback,
+                        onCheckedChange = onUpdateVibrationFeedback,
                         modifier = Modifier.graphicsLayer(scaleX = 0.85f, scaleY = 0.85f),
                     )
                 }

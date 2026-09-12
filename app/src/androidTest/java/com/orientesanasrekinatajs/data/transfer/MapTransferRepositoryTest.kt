@@ -52,6 +52,9 @@ class MapTransferRepositoryTest {
             lineDistanceMeters = 5f,
             rotationQuarterTurns = 1,
             name = "Exported map",
+            detailsPointsPerKilometer = true,
+            detailsRelativeValues = true,
+            detailsPointNumbering = true,
         )
 
         try {
@@ -67,6 +70,9 @@ class MapTransferRepositoryTest {
             assertEquals(control.id, imported.routeRestrictions.single().firstPointId)
             assertTrue(imported.points.single { it.id == control.id }.needsReview)
             assertEquals(1, imported.rotationQuarterTurns)
+            assertTrue(imported.detailsPointsPerKilometer)
+            assertTrue(imported.detailsRelativeValues)
+            assertTrue(imported.detailsPointNumbering)
         } finally {
             target.delete()
         }

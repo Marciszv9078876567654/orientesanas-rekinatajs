@@ -43,6 +43,10 @@ class SettingsViewModel(
         viewModelScope.launch { preferencesRepository.updateMapRotationGestures(enabled) }
     }
 
+    fun updateVibrationFeedback(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepository.updateVibrationFeedback(enabled) }
+    }
+
     fun updateUsageTips(enabled: Boolean) {
         viewModelScope.launch { preferencesRepository.updateUsageTips(enabled) }
     }

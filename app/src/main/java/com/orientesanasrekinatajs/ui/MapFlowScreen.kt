@@ -124,6 +124,16 @@ internal fun MapFlowScreen(
     var isDirty by rememberSaveable(sessionKey) {
         mutableStateOf(processingState.savedMapId == null || processingState.savedContentDirty)
     }
+    // View choices are saved with the map, but do not mark its content as dirty.
+    var detailsPointsPerKilometer by rememberSaveable(sessionKey) {
+        mutableStateOf(processingState.savedDetailsPointsPerKilometer)
+    }
+    var detailsRelativeValues by rememberSaveable(sessionKey) {
+        mutableStateOf(processingState.savedDetailsRelativeValues)
+    }
+    var detailsPointNumbering by rememberSaveable(sessionKey) {
+        mutableStateOf(processingState.savedDetailsPointNumbering)
+    }
     var editSnapshot by remember(sessionKey) { mutableStateOf(processingState) }
     var editLineStart by remember(sessionKey) { mutableStateOf(lineStart) }
     var editLineEnd by remember(sessionKey) { mutableStateOf(lineEnd) }
@@ -182,6 +192,9 @@ internal fun MapFlowScreen(
                 lineEnd = lineEnd,
                 lineDistanceMeters = lineMeters,
                 rotationQuarterTurns = nearestQuarterTurn(rotation, rotationOffsetDegrees),
+                detailsPointsPerKilometer = detailsPointsPerKilometer,
+                detailsRelativeValues = detailsRelativeValues,
+                detailsPointNumbering = detailsPointNumbering,
                 existingId = existingId,
                 name = name,
             )
@@ -314,7 +327,12 @@ internal fun MapFlowScreen(
             isDirty = isDirty,
             onSave = saveCurrentMap,
             onExport = requestExport,
-            onRouteSelectionChanged = { isDirty = true },
+            detailsPointsPerKilometer = detailsPointsPerKilometer,
+            onDetailsPointsPerKilometerChange = { detailsPointsPerKilometer = it },
+            detailsRelativeValues = detailsRelativeValues,
+            onDetailsRelativeValuesChange = { detailsRelativeValues = it },
+            detailsPointNumbering = detailsPointNumbering,
+            onDetailsPointNumberingChange = { detailsPointNumbering = it },
             onRename = { name ->
                 savedMapId?.let { id ->
                     onRenameSavedMap(id, name) { renamed -> savedMapName = renamed.name }
@@ -360,7 +378,7 @@ internal fun MapFlowScreen(
             routeMetadata = routingState.routeMetadata,
             routeRestrictions = routingState.routeRestrictions,
             onManageRoutes = { action ->
-                isDirty = true
+                if (action !is RouteManagementAction.Select) isDirty = true
                 if (action is RouteManagementAction.CreateEmpty) {
                     awaitingRouteGeneration = false
                 }

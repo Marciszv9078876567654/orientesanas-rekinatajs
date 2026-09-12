@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -18,10 +17,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.MoreVert
@@ -38,15 +38,16 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -73,6 +80,7 @@ import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
 import com.orientesanasrekinatajs.ui.components.routeColor
+import com.orientesanasrekinatajs.ui.components.MoveOrderArrows
 import com.orientesanasrekinatajs.ui.routing.RouteManagementAction
 
 @Composable
@@ -110,6 +118,44 @@ internal fun ManageRoutesDialog(
     var focusedRouteKey by remember { mutableStateOf<String?>(null) }
     var openMenuRouteKey by remember { mutableStateOf<String?>(null) }
     var pendingDeleteRouteKey by remember { mutableStateOf<String?>(null) }
+    val routeScrollState = rememberScrollState()
+    val rowBounds = remember { mutableMapOf<String, Rect>() }
+    var viewportTop by remember { mutableFloatStateOf(0f) }
+    var viewportBottom by remember { mutableFloatStateOf(0f) }
+    var draggedRouteId by remember { mutableStateOf<String?>(null) }
+    var draggedCenterY by remember { mutableFloatStateOf(0f) }
+    val edge = with(LocalDensity.current) { 56.dp.toPx() }
+    fun reorderDraggedRoute() {
+        val current = managedRoutes.indexOfFirst { it.id == draggedRouteId }
+        if (current < 0) return
+        val target = managedRoutes.indices.minByOrNull { index ->
+            rowBounds[managedRoutes[index].id]?.let {
+                kotlin.math.abs(it.center.y - draggedCenterY)
+            } ?: Float.MAX_VALUE
+        } ?: return
+        if (target != current) {
+            managedRoutes = managedRoutes.toMutableList().also {
+                it.add(target, it.removeAt(current))
+            }
+        }
+    }
+    // The center stays in viewport coordinates while scrolling updates the row bounds.
+    LaunchedEffect(draggedRouteId) {
+        if (draggedRouteId == null) return@LaunchedEffect
+        while (true) {
+            withFrameNanos { }
+            val direction = when {
+                draggedCenterY < viewportTop + edge -> -24f
+                draggedCenterY > viewportBottom - edge -> 24f
+                else -> 0f
+            }
+            if (direction != 0f) {
+                routeScrollState.scrollBy(direction)
+                withFrameNanos { }
+                reorderDraggedRoute()
+            }
+        }
+    }
     val hasUnsavedChanges = managedRoutes.map(OptimizedRoute::id) != initialRouteKeys ||
         managedMetadata != initialMetadata
     LaunchedEffect(focusedRouteKey) {
@@ -163,7 +209,12 @@ internal fun ManageRoutesDialog(
                 Column(
                     modifier = Modifier
                         .heightIn(max = 480.dp)
-                        .verticalScroll(rememberScrollState()),
+                        .testTag("managed_routes_list")
+                        .onGloballyPositioned { coordinates ->
+                            viewportTop = coordinates.positionInRoot().y
+                            viewportBottom = viewportTop + coordinates.size.height
+                        }
+                        .verticalScroll(routeScrollState),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
@@ -174,143 +225,155 @@ internal fun ManageRoutesDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     managedRoutes.forEachIndexed { index, managedRoute ->
-                        val key = managedRoute.id
-                        val metadata = managedMetadata.getValue(key)
-                        val duplicateName = stringResource(R.string.route_copy_name, metadata.name)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(IntrinsicSize.Min)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(routeColor(metadata.colorIndex).copy(alpha = 0.14f))
-                                .padding(horizontal = 6.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Box(
-                                Modifier
-                                    .width(7.dp)
-                                    .height(56.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(routeColor(metadata.colorIndex)),
-                            )
-                            OutlinedTextField(
-                                value = metadata.name,
-                                onValueChange = { name ->
-                                    managedMetadata = managedMetadata +
-                                        (key to metadata.copy(name = name.take(60)))
-                                },
-                                label = { Text(stringResource(R.string.route_name), color = Color.White) },
-                                singleLine = true,
+                        key(managedRoute.id) {
+                            val key = managedRoute.id
+                            val metadata = managedMetadata.getValue(key)
+                            val duplicateName = stringResource(R.string.route_copy_name, metadata.name)
+                            Row(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .offset(y = (-4).dp)
-                                    .testTag("managed_route_name_$index")
-                                    .onFocusChanged { state ->
-                                        if (state.isFocused) {
-                                            focusedRouteKey = key
-                                        } else if (focusedRouteKey == key) {
-                                            focusedRouteKey = null
-                                        }
-                                    },
-                            )
-                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                            Column(
-                                modifier = Modifier.fillMaxHeight(),
-                                verticalArrangement = Arrangement.Center,
+                                    .fillMaxWidth()
+                                    .height(IntrinsicSize.Min)
+                                    .testTag("managed_route_$key")
+                                    .onGloballyPositioned { coordinates ->
+                                        rowBounds[key] = Rect(coordinates.positionInRoot(), coordinates.size.toSize())
+                                    }
+                                    .graphicsLayer { alpha = if (draggedRouteId == key) 0.72f else 1f }
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(routeColor(metadata.colorIndex).copy(alpha = 0.14f))
+                                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                IconButton(
-                                    onClick = {
+                                Box(
+                                    Modifier
+                                        .width(7.dp)
+                                        .height(56.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(routeColor(metadata.colorIndex)),
+                                )
+                                OutlinedTextField(
+                                    value = metadata.name,
+                                    onValueChange = { name ->
+                                        managedMetadata = managedMetadata +
+                                            (key to metadata.copy(name = name.take(60)))
+                                    },
+                                    label = { Text(stringResource(R.string.route_name), color = Color.White) },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .offset(y = (-4).dp)
+                                        .testTag("managed_route_name_$index")
+                                        .onFocusChanged { state ->
+                                            if (state.isFocused) {
+                                                focusedRouteKey = key
+                                            } else if (focusedRouteKey == key) {
+                                                focusedRouteKey = null
+                                            }
+                                        },
+                                )
+                                MoveOrderArrows(
+                                    onMoveUp = {
                                         clearInputFocus()
                                         managedRoutes = managedRoutes.toMutableList().also { items ->
-                                            items[index] = items[index - 1]
-                                            items[index - 1] = managedRoute
+                                            items.add(index - 1, items.removeAt(index))
                                         }
                                     },
-                                    enabled = index > 0,
-                                    modifier = Modifier.size(28.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Default.ArrowUpward,
-                                        contentDescription = stringResource(R.string.move_route_up),
-                                    )
-                                }
-                                IconButton(
-                                    onClick = {
+                                    onMoveDown = {
                                         clearInputFocus()
                                         managedRoutes = managedRoutes.toMutableList().also { items ->
-                                            items[index] = items[index + 1]
-                                            items[index + 1] = managedRoute
+                                            items.add(index + 1, items.removeAt(index))
                                         }
                                     },
-                                    enabled = index < managedRoutes.lastIndex,
-                                    modifier = Modifier.size(28.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Default.ArrowDownward,
-                                        contentDescription = stringResource(R.string.move_route_down),
-                                    )
-                                }
-                            }
-                            }
-                            Box {
-                                IconButton(onClick = { clearInputFocus(); openMenuRouteKey = key }) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.route_actions))
-                                }
-                                DropdownMenu(
-                                    expanded = openMenuRouteKey == key,
-                                    onDismissRequest = { openMenuRouteKey = null },
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(if (metadata.isStarred) R.string.unstar_route else R.string.star_route)) },
-                                        leadingIcon = { Icon(if (metadata.isStarred) Icons.Default.Star else Icons.Default.StarBorder, null) },
-                                        onClick = {
-                                            managedMetadata = managedMetadata + (key to metadata.copy(isStarred = !metadata.isStarred))
-                                            openMenuRouteKey = null
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.duplicate_route)) },
-                                        leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
-                                        onClick = {
-                                            val duplicate = managedRoute.copy(id = java.util.UUID.randomUUID().toString())
-                                            managedRoutes = managedRoutes.toMutableList().also { it.add(index + 1, duplicate) }
-                                            val nextColor = com.orientesanasrekinatajs.domain.model.nextRouteColorIndex(managedMetadata.values)
-                                            managedMetadata = managedMetadata + (duplicate.id to metadata.copy(
-                                                name = duplicateName.take(60), isStarred = false,
-                                                colorIndex = nextColor, isDisplayed = false,
-                                            ))
-                                            openMenuRouteKey = null
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(if (metadata.isHidden) R.string.unhide_route else R.string.hide_route)) },
-                                        leadingIcon = { Icon(if (metadata.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, null) },
-                                        onClick = {
-                                            managedMetadata = managedMetadata + (key to metadata.copy(isHidden = !metadata.isHidden))
-                                            openMenuRouteKey = null
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(if (metadata.isDisplayed) R.string.remove_route_from_map else R.string.display_route_on_map)) },
-                                        leadingIcon = {
-                                            Icon(
-                                                if (metadata.isDisplayed) Icons.Default.MapIcon
-                                                else Icons.Outlined.OutlinedMapIcon,
-                                                null,
+                                    canMoveUp = index > 0,
+                                    canMoveDown = index < managedRoutes.lastIndex,
+                                    upDescription = stringResource(R.string.move_route_up),
+                                    downDescription = stringResource(R.string.move_route_down),
+                                )
+                                Icon(
+                                    Icons.Default.DragHandle,
+                                    contentDescription = stringResource(R.string.drag_route_to_reorder),
+                                    modifier = Modifier
+                                        .testTag("managed_route_drag_$key")
+                                        .pointerInput(key) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = {
+                                                    clearInputFocus()
+                                                    openMenuRouteKey = null
+                                                    draggedRouteId = key
+                                                    draggedCenterY = rowBounds[key]?.center?.y ?: 0f
+                                                },
+                                                onDragCancel = { draggedRouteId = null },
+                                                onDragEnd = { draggedRouteId = null },
+                                                onDrag = { change, amount ->
+                                                    change.consume()
+                                                    draggedCenterY = (draggedCenterY + amount.y)
+                                                        .coerceIn(viewportTop, viewportBottom)
+                                                    reorderDraggedRoute()
+                                                },
                                             )
-                                        },
-                                        onClick = {
-                                            managedMetadata = managedMetadata + (key to metadata.copy(isDisplayed = !metadata.isDisplayed))
-                                            openMenuRouteKey = null
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.delete_route)) },
-                                        leadingIcon = { Icon(Icons.Default.Delete, null) },
-                                        enabled = !metadata.isStarred,
-                                        onClick = { pendingDeleteRouteKey = key; openMenuRouteKey = null },
-                                    )
+                                        }
+                                        .size(40.dp)
+                                        .padding(8.dp),
+                                )
+                                Box {
+                                    IconButton(onClick = { clearInputFocus(); openMenuRouteKey = key }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.route_actions))
+                                    }
+                                    DropdownMenu(
+                                        expanded = openMenuRouteKey == key,
+                                        onDismissRequest = { openMenuRouteKey = null },
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(if (metadata.isStarred) R.string.unstar_route else R.string.star_route)) },
+                                            leadingIcon = { Icon(if (metadata.isStarred) Icons.Default.Star else Icons.Default.StarBorder, null) },
+                                            onClick = {
+                                                managedMetadata = managedMetadata + (key to metadata.copy(isStarred = !metadata.isStarred))
+                                                openMenuRouteKey = null
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.duplicate_route)) },
+                                            leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                                            onClick = {
+                                                val duplicate = managedRoute.copy(id = java.util.UUID.randomUUID().toString())
+                                                managedRoutes = managedRoutes.toMutableList().also { it.add(index + 1, duplicate) }
+                                                val nextColor = com.orientesanasrekinatajs.domain.model.nextRouteColorIndex(managedMetadata.values)
+                                                managedMetadata = managedMetadata + (duplicate.id to metadata.copy(
+                                                    name = duplicateName.take(60), isStarred = false,
+                                                    colorIndex = nextColor, isDisplayed = false,
+                                                ))
+                                                openMenuRouteKey = null
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(if (metadata.isHidden) R.string.unhide_route else R.string.hide_route)) },
+                                            leadingIcon = { Icon(if (metadata.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, null) },
+                                            onClick = {
+                                                managedMetadata = managedMetadata + (key to metadata.copy(isHidden = !metadata.isHidden))
+                                                openMenuRouteKey = null
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(if (metadata.isDisplayed) R.string.remove_route_from_map else R.string.display_route_on_map)) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    if (metadata.isDisplayed) Icons.Default.MapIcon
+                                                    else Icons.Outlined.OutlinedMapIcon,
+                                                    null,
+                                                )
+                                            },
+                                            onClick = {
+                                                managedMetadata = managedMetadata + (key to metadata.copy(isDisplayed = !metadata.isDisplayed))
+                                                openMenuRouteKey = null
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.delete_route)) },
+                                            leadingIcon = { Icon(Icons.Default.Delete, null) },
+                                            enabled = !metadata.isStarred,
+                                            onClick = { pendingDeleteRouteKey = key; openMenuRouteKey = null },
+                                        )
+                                    }
                                 }
                             }
                         }

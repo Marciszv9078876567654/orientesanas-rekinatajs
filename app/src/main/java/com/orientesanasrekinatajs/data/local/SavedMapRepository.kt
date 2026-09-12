@@ -43,6 +43,9 @@ data class SavedMapDraft(
     val lineEnd: Point2D?,
     val lineDistanceMeters: Float?,
     val rotationQuarterTurns: Int,
+    val detailsPointsPerKilometer: Boolean = false,
+    val detailsRelativeValues: Boolean = false,
+    val detailsPointNumbering: Boolean = false,
     val existingId: String? = null,
     val name: String? = null,
 )
@@ -66,6 +69,9 @@ data class SavedMap(
     val lineEnd: Point2D?,
     val lineDistanceMeters: Float?,
     val rotationQuarterTurns: Int,
+    val detailsPointsPerKilometer: Boolean = false,
+    val detailsRelativeValues: Boolean = false,
+    val detailsPointNumbering: Boolean = false,
 )
 
 /** Owns the image-file and Room parts of saving and reopening a processed route. */
@@ -119,6 +125,11 @@ class SavedMapRepository(
                     })
                 }
             }
+            put(ROUTE_DISPLAY_JSON_KEY, JSONObject().apply {
+                put("pointsPerKilometer", draft.detailsPointsPerKilometer)
+                put("relativeValues", draft.detailsRelativeValues)
+                put("pointNumbering", draft.detailsPointNumbering)
+            })
             put(ROUTE_RESTRICTIONS_JSON_KEY, JSONArray().apply {
                 draft.routeRestrictions.forEach { restriction ->
                     put(JSONObject().apply {
@@ -216,7 +227,7 @@ class SavedMapRepository(
             ) }
         val routeMetadata = runCatching {
             val json = JSONObject(stored.map.routeMetadataJson)
-            json.keys().asSequence().filterNot { it == ROUTE_RESTRICTIONS_JSON_KEY }.associateWith { key ->
+            json.keys().asSequence().filterNot { it == ROUTE_RESTRICTIONS_JSON_KEY || it == ROUTE_DISPLAY_JSON_KEY }.associateWith { key ->
                 val value = json.getJSONObject(key)
                 RouteMetadata(
                     name = value.optString("name"),
@@ -259,6 +270,9 @@ class SavedMapRepository(
                 primaryRouteId ?: UUID.randomUUID().toString(),
             )
         }
+        val displayOptions = runCatching {
+            JSONObject(stored.map.routeMetadataJson).optJSONObject(ROUTE_DISPLAY_JSON_KEY)
+        }.getOrNull()
         SavedMap(
             id = stored.map.id,
             name = stored.map.name,
@@ -282,6 +296,9 @@ class SavedMapRepository(
             },
             lineDistanceMeters = stored.map.lineDistanceMeters,
             rotationQuarterTurns = stored.map.rotationQuarterTurns,
+            detailsPointsPerKilometer = displayOptions?.optBoolean("pointsPerKilometer") ?: false,
+            detailsRelativeValues = displayOptions?.optBoolean("relativeValues") ?: false,
+            detailsPointNumbering = displayOptions?.optBoolean("pointNumbering") ?: false,
         )
     }
 
@@ -371,6 +388,7 @@ class SavedMapRepository(
         "Route ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))}"
 
     companion object {
+        private const val ROUTE_DISPLAY_JSON_KEY = "__routeDisplay"
         private const val ROUTE_RESTRICTIONS_JSON_KEY = "__routeRestrictions"
 
         fun create(context: Context): SavedMapRepository = SavedMapRepository(

@@ -104,6 +104,10 @@ class MapDaoTest {
                 pixelsPerMeter = 2.5f,
                 points = listOf(start, point, finish),
                 route = primaryRoute,
+                selectedRoute = alternativeRoute,
+                detailsPointsPerKilometer = true,
+                detailsRelativeValues = true,
+                detailsPointNumbering = true,
                 alternativeRoutes = listOf(alternativeRoute),
                 routeMetadata = mapOf(
                     alternativeRoute.id to RouteMetadata(
@@ -157,7 +161,18 @@ class MapDaoTest {
             reopened.routeRestrictions.single().firstPointId,
         )
         assertTrue(reopened.routeRestrictions.single().isStarred)
-        assertEquals(reopenedRoute.path.map(ControlPoint::id), reopened.selectedRoutePointIds)
+        assertEquals(alternativeRoute.id, reopened.selectedRouteId)
+        assertEquals(reopened.alternativeRoutes.single().path.map(ControlPoint::id), reopened.selectedRoutePointIds)
+        assertTrue(reopened.detailsPointsPerKilometer)
+        assertTrue(reopened.detailsRelativeValues)
+        assertTrue(reopened.detailsPointNumbering)
+        // Older maps have no display-options entry and retain the previous defaults.
+        database.mapDao().updateMap(stored.copy(routeMetadataJson = org.json.JSONObject(stored.routeMetadataJson)
+            .apply { remove("__routeDisplay") }.toString()))
+        val legacy = repository.load(stored.id)
+        assertEquals(false, legacy.detailsPointsPerKilometer)
+        assertEquals(false, legacy.detailsRelativeValues)
+        assertEquals(false, legacy.detailsPointNumbering)
         assertEquals("TARGET_SCORE", reopened.routeMode)
         assertEquals(12, reopened.routeTargetScore)
 

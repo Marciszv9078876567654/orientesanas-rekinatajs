@@ -16,6 +16,16 @@ import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PreferencesRepositoryTest {
+    @Test
+    fun vibrationDefaultsOnAndPersistsBothChoices() = runBlocking {
+        val store = FakeDataStore(mutablePreferencesOf())
+        val repository = PreferencesRepository(store)
+        assertEquals(true, repository.userPreferencesFlow.first().vibrationFeedback)
+        repository.updateVibrationFeedback(false)
+        assertEquals(false, PreferencesRepository(store).userPreferencesFlow.first().vibrationFeedback)
+        repository.updateVibrationFeedback(true)
+        assertEquals(true, PreferencesRepository(store).userPreferencesFlow.first().vibrationFeedback)
+    }
 
     @Test
     fun usageTipsCanBeDisabled() = runBlocking {

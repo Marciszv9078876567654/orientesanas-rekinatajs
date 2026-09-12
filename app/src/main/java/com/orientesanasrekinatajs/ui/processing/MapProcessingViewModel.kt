@@ -44,6 +44,9 @@ data class MapProcessingUiState(
     val savedLineEnd: com.orientesanasrekinatajs.domain.model.Point2D? = null,
     val savedLineDistanceMeters: Float? = null,
     val savedRotationQuarterTurns: Int = 0,
+    val savedDetailsPointsPerKilometer: Boolean = false,
+    val savedDetailsRelativeValues: Boolean = false,
+    val savedDetailsPointNumbering: Boolean = false,
     val savedContentDirty: Boolean = false,
     val stage: MapProcessingStage = MapProcessingStage.IDLE,
     val error: String? = null,
@@ -174,7 +177,8 @@ class MapProcessingViewModel internal constructor(
         val current = _uiState.value
         _uiState.value = current.copy(
             controlPoints = current.controlPoints.map { point ->
-                if (point.id == updated.id) updated.copy(needsReview = false) else point
+                // The editor decides whether this edit resolves review or introduces a duplicate.
+                if (point.id == updated.id) updated else point
             },
             savedContentDirty = true,
         )
@@ -182,7 +186,7 @@ class MapProcessingViewModel internal constructor(
 
     fun addControlPoint(point: ControlPoint) {
         _uiState.value = _uiState.value.copy(
-            controlPoints = _uiState.value.controlPoints + point.copy(needsReview = false),
+            controlPoints = _uiState.value.controlPoints + point,
             savedContentDirty = true,
         )
     }
@@ -220,6 +224,9 @@ class MapProcessingViewModel internal constructor(
             savedLineEnd = saved.lineEnd,
             savedLineDistanceMeters = saved.lineDistanceMeters,
             savedRotationQuarterTurns = saved.rotationQuarterTurns,
+            savedDetailsPointsPerKilometer = saved.detailsPointsPerKilometer,
+            savedDetailsRelativeValues = saved.detailsRelativeValues,
+            savedDetailsPointNumbering = saved.detailsPointNumbering,
             stage = MapProcessingStage.COMPLETE,
         )
     }
@@ -411,6 +418,9 @@ class MapProcessingViewModel internal constructor(
             savedLineEnd = draft.lineEnd,
             savedLineDistanceMeters = draft.lineDistanceMeters,
             savedRotationQuarterTurns = draft.rotationQuarterTurns,
+            savedDetailsPointsPerKilometer = draft.detailsPointsPerKilometer,
+            savedDetailsRelativeValues = draft.detailsRelativeValues,
+            savedDetailsPointNumbering = draft.detailsPointNumbering,
             savedContentDirty = false,
         )
     }

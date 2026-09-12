@@ -613,6 +613,7 @@ internal fun EditMapScreen(
         visiblePoints.firstOrNull { it.id == id }?.let { point ->
             ControlPointEditorDialog(
                 point = point,
+                points = visiblePoints,
                 isNew = point.id == newPointId,
                 onSave = { savedPoint ->
                     editedPoints = visiblePoints.map {
@@ -710,6 +711,7 @@ internal fun MapOverlayButtons(
 @Composable
 internal fun ControlPointEditorDialog(
     point: ControlPoint,
+    points: List<ControlPoint>,
     isNew: Boolean,
     onSave: (ControlPoint) -> Unit,
     onDelete: () -> Unit,
@@ -720,6 +722,11 @@ internal fun ControlPointEditorDialog(
         mutableStateOf(if (isNew || point.needsReview) "" else point.code.toString())
     }
     var type by rememberSaveable(point.id) { mutableStateOf(point.type) }
+    val duplicateCode = type == ControlPointType.CONTROL && isValidControlCode(codeText) &&
+        points.any {
+            it.id != point.id && it.type == ControlPointType.CONTROL &&
+                it.code == codeText.toIntOrNull()
+        }
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.clearFocusOnPointerDown(focusManager),
@@ -739,6 +746,14 @@ internal fun ControlPointEditorDialog(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("controlPointCode"),
                     )
+                    if (duplicateCode) {
+                        Text(
+                            stringResource(R.string.duplicate_control_code, codeText.toInt()),
+                            modifier = Modifier.testTag("duplicateControlCodeWarning"),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     ControlPointType.entries.chunked(2).forEach { row ->
@@ -779,7 +794,8 @@ internal fun ControlPointEditorDialog(
                                 code = code,
                                 points = if (type == ControlPointType.CONTROL) code / 10 else 0,
                                 type = type,
-                                needsReview = false,
+                                // Manual edits flag only this point; OCR handles full-map review.
+                                needsReview = duplicateCode,
                             ),
                         )
                     },

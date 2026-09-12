@@ -117,7 +117,12 @@ internal fun RouteScreen(
     isDirty: Boolean,
     onSave: (OptimizedRoute?, Boolean) -> Unit,
     onExport: () -> Unit,
-    onRouteSelectionChanged: () -> Unit,
+    detailsPointsPerKilometer: Boolean,
+    onDetailsPointsPerKilometerChange: (Boolean) -> Unit,
+    detailsRelativeValues: Boolean,
+    onDetailsRelativeValuesChange: (Boolean) -> Unit,
+    detailsPointNumbering: Boolean,
+    onDetailsPointNumberingChange: (Boolean) -> Unit,
     onRename: (String) -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
@@ -185,11 +190,6 @@ internal fun RouteScreen(
         }
     }
     var showDetails by rememberSaveable { mutableStateOf(false) }
-    var detailsPointsPerKilometer by rememberSaveable {
-        mutableStateOf(false)
-    }
-    var detailsRelativeValues by rememberSaveable { mutableStateOf(false) }
-    var detailsPointNumbering by rememberSaveable { mutableStateOf(false) }
     var routeDetailsPanelState by rememberSaveable {
         mutableStateOf(RouteDetailsPanelState.HALF)
     }
@@ -653,18 +653,17 @@ internal fun RouteScreen(
             routeMetadata = routeMetadata,
             selectedRouteId = selectedRouteId,
             showPointsPerKilometer = detailsPointsPerKilometer,
-            onShowPointsPerKilometerChange = { detailsPointsPerKilometer = it },
+            onShowPointsPerKilometerChange = onDetailsPointsPerKilometerChange,
             showRelativeValues = detailsRelativeValues,
-            onShowRelativeValuesChange = { detailsRelativeValues = it },
+            onShowRelativeValuesChange = onDetailsRelativeValuesChange,
             showPointNumbering = detailsPointNumbering,
-            onShowPointNumberingChange = { detailsPointNumbering = it },
+            onShowPointNumberingChange = onDetailsPointNumberingChange,
             panelState = routeDetailsPanelState,
             onPanelStateChange = { routeDetailsPanelState = it },
             onRouteSelected = { newRouteId ->
                 if (newRouteId != selectedRouteId) {
                     selectedRouteId = newRouteId
                     onManageRoutes(RouteManagementAction.Select(newRouteId))
-                    onRouteSelectionChanged()
                 }
             },
             onDismissRequest = { showDetails = false },
@@ -724,7 +723,6 @@ internal fun RouteScreen(
                 if (newRouteId != selectedRouteId) {
                     selectedRouteId = newRouteId
                     onManageRoutes(RouteManagementAction.Select(newRouteId))
-                    onRouteSelectionChanged()
                 }
             },
             isGenerating = isGeneratingAlternatives,

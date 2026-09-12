@@ -255,4 +255,13 @@
     <string name="absolute_values">Absolute</string>
     <string name="relative_values">Relative</string>
     <string name="show_point_numbering">Show collection order on map</string>
+    <string name="drag_point_to_reorder">Long press and drag to reorder point</string>
+    <string name="drag_route_to_reorder">Long press and drag to reorder route</string>
+    <string name="mandatory_connection_limit">Point %1$s can have at most %2$d mandatory connections.</string>
+    <string name="duplicate_control_code">Another control already uses code %1$d. This point will be flagged for review.</string>
+    <string name="route_editor_number">Number</string>
+    <string name="route_editor_control">Control</string>
+    <string name="route_editor_points">Points</string>
+    <string name="vibration_feedback">Vibration feedback</string>
+    <string name="remove_route_point_confirmation">Remove control %1$d from this route?</string>
 </resources>

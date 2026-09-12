@@ -183,6 +183,7 @@ class MainActivity : AppCompatActivity() {
                     onUpdateLanguage = settingsViewModel::updateLanguage,
                     onUpdateAnimations = settingsViewModel::updateAnimations,
                     onUpdateMapRotationGestures = settingsViewModel::updateMapRotationGestures,
+                    onUpdateVibrationFeedback = settingsViewModel::updateVibrationFeedback,
                     onUpdateUsageTips = settingsViewModel::updateUsageTips,
                     modifier = Modifier.fillMaxSize(),
                 )

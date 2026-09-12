@@ -9,6 +9,8 @@ import com.orientesanasrekinatajs.domain.model.RouteSegment
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
 import com.orientesanasrekinatajs.domain.model.RouteRestriction
 import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
+import com.orientesanasrekinatajs.domain.model.mandatoryConnectionLimit
+import com.orientesanasrekinatajs.domain.model.mandatoryConnectionCounts
 import com.orientesanasrekinatajs.domain.routing.DistanceMatrix
 import com.orientesanasrekinatajs.domain.routing.RoutingAlgorithms
 import kotlinx.coroutines.CancellationException
@@ -802,6 +804,19 @@ class RoutingViewModel internal constructor(
             .mapTo(mutableSetOf()) { it.connectionKey() }
         require(blacklistedConnections.intersect(mandatoryConnections).isEmpty()) {
             "A connection cannot be both blacklisted and mandatory"
+        }
+        mandatoryConnectionCounts(restrictions).forEach { (id, count) ->
+            val point = pointsById.getValue(id)
+            require(count <= point.mandatoryConnectionLimit) {
+                val label = when (point.type) {
+                    ControlPointType.CONTROL -> "Control ${point.code}"
+                    ControlPointType.START -> "The start"
+                    ControlPointType.FINISH -> "The finish"
+                    ControlPointType.START_FINISH -> "The combined start/finish"
+                }
+                val connection = if (point.mandatoryConnectionLimit == 1) "connection" else "connections"
+                "$label can have at most ${point.mandatoryConnectionLimit} mandatory $connection"
+            }
         }
     }
 

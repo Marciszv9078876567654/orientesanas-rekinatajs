@@ -10,12 +10,15 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import com.orientesanasrekinatajs.domain.model.ThemeConfig
 import com.orientesanasrekinatajs.domain.model.UserPreferences
 
 /** Whether optional UI and route-rendering animations should run. */
 val LocalAnimationsEnabled = staticCompositionLocalOf { true }
+val LocalLongPressFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
@@ -62,8 +65,12 @@ fun OrienteeringAppTheme(
         else -> LightColorScheme
     }
 
+    val haptics = LocalHapticFeedback.current
     CompositionLocalProvider(
         LocalAnimationsEnabled provides userPreferences.useAnimations,
+        LocalLongPressFeedback provides {
+            if (userPreferences.vibrationFeedback) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        },
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

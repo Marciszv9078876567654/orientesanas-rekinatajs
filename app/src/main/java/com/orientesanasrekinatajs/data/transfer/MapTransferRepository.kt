@@ -352,6 +352,9 @@ class MapTransferRepository(
                 }
             })
             put("selectedRouteId", if (includeRoutes) draft.selectedRoute?.id.orEmpty() else "")
+            put("detailsPointsPerKilometer", draft.detailsPointsPerKilometer)
+            put("detailsRelativeValues", draft.detailsRelativeValues)
+            put("detailsPointNumbering", draft.detailsPointNumbering)
             put("routeMode", draft.routeMode)
             draft.routeBudgetMeters?.let { put("routeBudgetMeters", it) }
             draft.routeTargetScore?.let { put("routeTargetScore", it) }
@@ -418,6 +421,9 @@ class MapTransferRepository(
             routeRestrictions = restrictions,
             selectedRoutePointIds = selected?.path?.map(ControlPoint::id).orEmpty(),
             selectedRouteId = selectedId,
+            detailsPointsPerKilometer = manifest.optBoolean("detailsPointsPerKilometer"),
+            detailsRelativeValues = manifest.optBoolean("detailsRelativeValues"),
+            detailsPointNumbering = manifest.optBoolean("detailsPointNumbering"),
             routeMode = manifest.optString("routeMode", "SHORTEST"),
             routeBudgetMeters = manifest.optDoubleOrNull("routeBudgetMeters")?.toFloat(),
             routeTargetScore = manifest.optIntOrNull("routeTargetScore"),

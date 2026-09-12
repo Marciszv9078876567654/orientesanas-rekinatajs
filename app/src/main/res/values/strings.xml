@@ -259,4 +259,13 @@
     <string name="absolute_values">Absolūtās vērtības</string>
     <string name="relative_values">Relatīvās vērtības</string>
     <string name="show_point_numbering">Rādīt punktu apmeklēšanas secību kartē</string>
+    <string name="drag_point_to_reorder">Turiet nospiestu un velciet, lai pārkārtotu punktu</string>
+    <string name="drag_route_to_reorder">Turiet nospiestu un velciet, lai pārkārtotu maršrutu</string>
+    <string name="mandatory_connection_limit">Punktam %1$s var būt ne vairāk kā %2$d obligātie savienojumi.</string>
+    <string name="duplicate_control_code">Kontrolpunkts ar kodu %1$d jau pastāv. Šis punkts tiks atzīmēts pārbaudei.</string>
+    <string name="route_editor_number">Numurs</string>
+    <string name="route_editor_control">Kontrolpunkts</string>
+    <string name="route_editor_points">Punkti</string>
+    <string name="vibration_feedback">Vibrācijas atgriezeniskā saite</string>
+    <string name="remove_route_point_confirmation">Vai noņemt kontrolpunktu %1$d no maršruta?</string>
 </resources>
