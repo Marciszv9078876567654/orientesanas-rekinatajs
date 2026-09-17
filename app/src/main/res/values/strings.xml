@@ -10,6 +10,7 @@
     <string name="sequence_header">Nr.</string>
     <string name="control_header">Kontrolpunkts</string>
     <string name="distance_header">Attālums</string>
+    <string name="distance_total_header">Attālums kopā</string>
     <string name="score_header">Punkti</string>
     <string name="score_total_header">Punkti kopā</string>
     <string name="save_map">Saglabāt karti</string>
@@ -268,4 +269,9 @@
     <string name="route_editor_points">Punkti</string>
     <string name="vibration_feedback">Vibrācijas atgriezeniskā saite</string>
     <string name="remove_route_point_confirmation">Vai noņemt kontrolpunktu %1$d no maršruta?</string>
+    <string name="managed_route_name">Maršruta nosaukums</string>
+    <string name="restriction_point_contradiction">Punkts %1$s nevar būt vienlaikus aizliegts un obligāts (arī kā obligātā savienojuma daļa).</string>
+    <string name="restriction_connection_contradiction">Savienojums %1$s–%2$s nevar būt vienlaikus aizliegts un obligāts.</string>
+    <string name="starred_route">Maršruts ar zvaigznīti</string>
+    <string name="set_active_route">Iestatīt kā aktīvo maršrutu</string>
 </resources>

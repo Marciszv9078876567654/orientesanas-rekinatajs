@@ -287,6 +287,14 @@ class ReorderControlsTest {
     }
 
     @Test fun routeHandleScrollsAtEdgeAndStopsOnCancel() {
+        dragManagedRouteToEnd(cancel = true)
+    }
+
+    @Test fun routeHandleCommitsAfterSourceScrollsOutOfView() {
+        dragManagedRouteToEnd(cancel = false)
+    }
+
+    private fun dragManagedRouteToEnd(cancel: Boolean) {
         val routes = (0..11).map { route.copy(id = "r$it") }
         var saved: RouteManagementAction.Apply? = null
         compose.setContent {
@@ -305,12 +313,71 @@ class ReorderControlsTest {
             moveBy(Offset(0f, distance), delayMillis = 100)
         }
         compose.mainClock.advanceTimeBy(3000)
-        handle.performTouchInput { cancel() }
+        compose.onNodeWithTag("managed_route_drag_r0").assertDoesNotExist()
+        compose.onNodeWithTag("managed_route_drag_preview").assertExists()
+        compose.onNodeWithTag("managed_routes_list").performTouchInput { if (cancel) cancel() else up() }
         compose.mainClock.autoAdvance = true
         compose.onNodeWithText(label(R.string.save)).performClick()
         compose.runOnIdle {
-            assertEquals("r0", saved!!.orderedRoutes.last().id)
+            val expected = if (cancel) routes else routes.drop(1) + routes.first()
+            assertEquals(expected.map { it.id }, saved!!.orderedRoutes.map { it.id })
             assertEquals(routes.map { it.id }.toSet(), saved!!.orderedRoutes.map { it.id }.toSet())
+        }
+    }
+
+    @Test fun managedRouteDropSettlesFromReleasePositionAndSavesNewOrder() {
+        val routes = listOf("a", "b", "c").map { route.copy(id = it) }
+        var saved: RouteManagementAction.Apply? = null
+        compose.setContent {
+            OrienteeringAppTheme(UserPreferences()) {
+                ManageRoutesDialog(routes[0], routes.drop(1), 0, emptyMap(),
+                    { saved = it as RouteManagementAction.Apply }, {})
+            }
+        }
+        // Keep all three rows clear of the auto-scroll edges while measuring the drop animation.
+        compose.onNodeWithTag("manage_routes_title").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -1200f), delayMillis = 300)
+            up()
+        }
+        val handle = compose.onNodeWithTag("managed_route_drag_a")
+        val distance = compose.onNodeWithTag("managed_route_drag_c").fetchSemanticsNode().boundsInRoot.center.y -
+            handle.fetchSemanticsNode().boundsInRoot.center.y - 25f
+        compose.mainClock.autoAdvance = false
+        handle.performTouchInput {
+            down(center)
+            advanceEventTime(700)
+            moveBy(Offset(0f, distance), delayMillis = 100)
+        }
+        compose.mainClock.advanceTimeBy(64)
+        compose.onNodeWithTag("managed_route_name_0").assert(hasAnyAncestor(hasTestTag("managed_route_a")))
+        compose.onNodeWithTag("managed_route_insertion").assertExists()
+        val top = compose.onNodeWithTag("managed_route_drag_preview").fetchSemanticsNode().boundsInRoot.top
+        compose.onNodeWithTag("managed_routes_list").performTouchInput { up() }
+        compose.mainClock.advanceTimeByFrame()
+        val drop = compose.onNodeWithTag("managed_route_drop_preview")
+        assertEquals(top, drop.fetchSemanticsNode().boundsInRoot.top, 2f)
+        compose.mainClock.advanceTimeBy(144)
+        assertTrue(drop.fetchSemanticsNode().boundsInRoot.top > top)
+        compose.mainClock.autoAdvance = true
+        drop.assertDoesNotExist()
+        compose.onNodeWithText(label(R.string.save)).performClick()
+        compose.runOnIdle { assertEquals(listOf("b", "c", "a"), saved!!.orderedRoutes.map { it.id }) }
+    }
+
+    @Test fun managedRouteArrowsScrollWithMovedRow() {
+        val routes = (0..20).map { route.copy(id = "r$it") }
+        compose.setContent {
+            OrienteeringAppTheme(UserPreferences()) {
+                ManageRoutesDialog(routes[0], routes.drop(1), 0, emptyMap(), {}, {})
+            }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(8)
+        val before = compose.onNodeWithTag("managed_route_r9").fetchSemanticsNode().boundsInRoot.center.y
+        repeat(2) {
+            compose.onNode(hasContentDescription(label(R.string.move_route_down)) and
+                hasAnyAncestor(hasTestTag("managed_route_r9"))).performClick()
+            assertEquals(before, compose.onNodeWithTag("managed_route_r9").fetchSemanticsNode().boundsInRoot.center.y, 2f)
         }
     }
 }

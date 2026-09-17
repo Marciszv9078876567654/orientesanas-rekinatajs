@@ -10,6 +10,7 @@
     <string name="sequence_header">#</string>
     <string name="control_header">Control</string>
     <string name="distance_header">Distance</string>
+    <string name="distance_total_header">Distance total</string>
     <string name="score_header">Score</string>
     <string name="score_total_header">Score total</string>
     <string name="save_map">Save map</string>
@@ -264,4 +265,9 @@
     <string name="route_editor_points">Points</string>
     <string name="vibration_feedback">Vibration feedback</string>
     <string name="remove_route_point_confirmation">Remove control %1$d from this route?</string>
+    <string name="managed_route_name">Route name</string>
+    <string name="restriction_point_contradiction">Point %1$s cannot be both blacklisted and mandatory (including as part of a mandatory connection).</string>
+    <string name="restriction_connection_contradiction">Connection %1$s–%2$s cannot be both blacklisted and mandatory.</string>
+    <string name="starred_route">Starred route</string>
+    <string name="set_active_route">Set as active route</string>
 </resources>

@@ -2,7 +2,7 @@ package com.orientesanasrekinatajs.ui.components
 
 import kotlin.math.abs
 
-/** Long drags settle where released; only deliberate short flicks advance an anchor. */
+/** The release position takes priority; a flick can leave the current anchor before its midpoint. */
 internal fun settledPanelIndex(
     heights: List<Float>,
     currentIndex: Int,
@@ -13,9 +13,9 @@ internal fun settledPanelIndex(
 ): Int {
     val nearest = heights.indices.minBy { abs(heights[it] - releasedHeight) }
     if (nearest != currentIndex) return nearest
-    val shortFlick = abs(dragDistance) in (12f * density)..(56f * density) &&
-        abs(velocity) >= 1200f * density
-    return if (shortFlick) {
+    val flick = abs(dragDistance) >= 8f * density &&
+        abs(velocity) >= 400f * density && dragDistance * velocity > 0f
+    return if (flick) {
         (currentIndex + if (velocity < 0f) 1 else -1).coerceIn(heights.indices)
     } else nearest
 }

@@ -513,6 +513,35 @@ class Phase8ViewModelTest {
     }
 
     @Test
+    fun routing_restrictionContradictionsKeepTheirValidationMessages() {
+        val points = listOf(
+            ControlPoint("start", 0, 0, Point2D(0f, 0f), ControlPointType.START),
+            ControlPoint("a", 31, 1, Point2D(1f, 0f), ControlPointType.CONTROL),
+            ControlPoint("b", 32, 1, Point2D(2f, 0f), ControlPointType.CONTROL),
+            ControlPoint("finish", 0, 0, Point2D(3f, 0f), ControlPointType.FINISH),
+        )
+        val cases = listOf(
+            listOf(RouteRestriction(RouteRestrictionType.BLACKLIST_CONTROL, "a"),
+                RouteRestriction(RouteRestrictionType.MANDATORY_CONTROL, "a")) to
+                "A point cannot be both blacklisted and mandatory",
+            listOf(RouteRestriction(RouteRestrictionType.BLACKLIST_CONTROL, "a"),
+                RouteRestriction(RouteRestrictionType.MANDATORY_CONNECTION, "b", "a")) to
+                "A point cannot be both blacklisted and mandatory",
+            listOf(RouteRestriction(RouteRestrictionType.BLACKLIST_CONNECTION, "a", "b"),
+                RouteRestriction(RouteRestrictionType.MANDATORY_CONNECTION, "b", "a")) to
+                "A connection cannot be both blacklisted and mandatory",
+        )
+        cases.forEach { (rules, expected) ->
+            val model = RoutingViewModel(Dispatchers.Unconfined)
+            onMainThread {
+                model.openSavedRestrictions(rules)
+                model.calculateRoute(points, 1f, RouteMode.SHORTEST)
+            }
+            assertEquals(expected, model.uiState.value.error)
+        }
+    }
+
+    @Test
     fun routing_alternativesKeepPrefixThroughSelectedSplitPoint() {
         val viewModel = RoutingViewModel(Dispatchers.Unconfined)
         val points = listOf(

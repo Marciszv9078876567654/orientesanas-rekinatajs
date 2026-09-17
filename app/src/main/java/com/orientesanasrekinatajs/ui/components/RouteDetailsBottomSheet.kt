@@ -4,10 +4,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -15,12 +15,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.rememberScrollable2DState
+import androidx.compose.foundation.gestures.scrollable2D
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,15 +62,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import kotlin.math.roundToInt
 import com.orientesanasrekinatajs.R
 import com.orientesanasrekinatajs.domain.model.OptimizedRoute
@@ -394,6 +404,8 @@ fun RouteEditorBottomSheet(
     onPathChange: (List<ControlPoint>) -> Unit,
     onSaveRequest: () -> Unit,
     onCancelRequest: () -> Unit,
+    closing: Boolean = false,
+    onClosed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var addPointMenuExpanded by remember { mutableStateOf(false) }
@@ -404,10 +416,12 @@ fun RouteEditorBottomSheet(
     val availableControls = allPoints.filter { point ->
         point.type == ControlPointType.CONTROL && point.id !in usedPointIds
     }.sortedBy(ControlPoint::code)
+    var headerHeight by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var footerHeight by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val canReverse = editedPath.any { it.type == ControlPointType.START_FINISH }
     BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
         val density = LocalDensity.current
-        val minimumHeightPx = with(density) { 176.dp.toPx() }
+        val minimumHeightPx = kotlin.math.ceil(headerHeight + footerHeight + with(density) { 9.dp.toPx() })
         val maximumHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(minimumHeightPx)
         val halfHeightPx = (constraints.maxHeight * 0.5f).coerceIn(
             minimumHeightPx,
@@ -423,6 +437,7 @@ fun RouteEditorBottomSheet(
         var isPanelDragging by remember { mutableStateOf(false) }
         LaunchedEffect(
             panelState,
+            minimumHeightPx,
             settleRequest,
             constraints.maxHeight,
             animationsEnabled,
@@ -452,20 +467,21 @@ fun RouteEditorBottomSheet(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .dynamicHeightPx { panelHeightPx },
+                .dynamicHeightPx { panelHeightPx }.then(panelExitModifier(closing, onClosed)),
             shape = RoundedCornerShape(topStart = topCorner, topEnd = topCorner),
             color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 3.dp,
-            shadowElevation = 8.dp * (1f - fullScreenProgress),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
-        Column(Modifier.fillMaxHeight()) {
+        Column(Modifier.minimumContentHeightPx { minimumHeightPx }.fillMaxHeight()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .wrapContentHeight(unbounded = true).onSizeChanged { headerHeight = it.height }
                 .draggable(
                     state = panelDragState,
                     orientation = Orientation.Vertical,
-                    enabled = !isPointDragging,
+                    enabled = !isPointDragging && !closing,
                     onDragStarted = {
                         isPanelDragging = true
                         dragDistanceY = 0f
@@ -482,7 +498,7 @@ fun RouteEditorBottomSheet(
                     },
                 )
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Box(
                 Modifier
@@ -494,14 +510,21 @@ fun RouteEditorBottomSheet(
             )
             Text(
                 text = stringResource(R.string.edit_route),
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                modifier = Modifier.fillMaxWidth(),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                OutlinedButton(
+                    onClick = { onPathChange(editedPath.reversed()) },
+                    enabled = canReverse,
+                ) {
+                    Icon(Icons.Default.SwapVert, contentDescription = null)
+                    Text(stringResource(R.string.reverse_route))
+                }
                 Box(Modifier.weight(1f)) {
                     OutlinedButton(
                         onClick = { addPointMenuExpanded = true },
@@ -534,33 +557,30 @@ fun RouteEditorBottomSheet(
                         }
                     }
                 }
-                OutlinedButton(
-                    onClick = { onPathChange(editedPath.reversed()) },
-                    enabled = canReverse,
-                ) {
-                    Icon(Icons.Default.SwapVert, contentDescription = null)
-                    Text(stringResource(R.string.reverse_route))
-                }
             }
         }
-        val showEditorList = panelState != RouteEditorPanelState.MINIMIZED ||
-            panelHeightPx > minimumHeightPx
+        val showEditorList = panelHeightPx > minimumHeightPx + with(density) { 12.dp.toPx() }
+        Spacer(Modifier.height(8.dp))
         if (showEditorList) {
+            HorizontalDivider()
             RouteEditorPointList(
                 path = editedPath,
                 onPathChange = onPathChange,
                 onDraggingChange = { isPointDragging = it },
-                modifier = Modifier.fillMaxWidth().weight(1f).graphicsLayer {
+                modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds().graphicsLayer {
                     alpha = ((panelHeightPx - minimumHeightPx) / with(density) { 36.dp.toPx() })
                         .coerceIn(0f, 1f)
                 },
             )
         } else {
+            // The disappearing list still owns the remaining animated height.
             Spacer(Modifier.weight(1f))
         }
+        HorizontalDivider()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .wrapContentHeight(unbounded = true).onSizeChanged { footerHeight = it.height }
                 .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
@@ -609,43 +629,100 @@ fun RouteStepTable(
     route: OptimizedRoute,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.testTag("routeStepTable")) {
-        RouteTableRow(
-            sequence = stringResource(R.string.sequence_header),
-            control = stringResource(R.string.control_header),
-            distance = stringResource(R.string.distance_header),
-            score = stringResource(R.string.score_header),
-            scoreTotal = stringResource(R.string.score_total_header),
-            isHeader = true,
+    val headers = listOf(
+        stringResource(R.string.sequence_header),
+        stringResource(R.string.control_header),
+        stringResource(R.string.distance_header),
+        stringResource(R.string.distance_total_header),
+        stringResource(R.string.score_header),
+        stringResource(R.string.score_total_header),
+    )
+    val rows = route.path.mapIndexed { index, control ->
+        val segment = route.segments.getOrNull(index - 1)
+        listOf(
+            (index + 1).toString(),
+            when (control.type) {
+                ControlPointType.START -> "S"
+                ControlPointType.FINISH -> "F"
+                ControlPointType.START_FINISH -> "-"
+                ControlPointType.CONTROL -> control.code.toString()
+            },
+            stringResource(R.string.distance_meters_format, segment?.distanceMeters ?: 0f),
+            stringResource(R.string.distance_meters_format, segment?.accumulatedDistanceMeters ?: 0f),
+            if (control.type == ControlPointType.CONTROL) control.points.toString() else "-",
+            (segment?.accumulatedPoints ?: 0).toString(),
         )
-        HorizontalDivider()
-        LazyColumn {
-            itemsIndexed(
-                items = route.path,
-                key = { index, control -> "$index:${control.id}" },
-            ) { index, control ->
-                val segment = route.segments.getOrNull(index - 1)
-                RouteTableRow(
-                    sequence = (index + 1).toString(),
-                    control = when (control.type) {
-                        ControlPointType.START -> "S"
-                        ControlPointType.FINISH -> "F"
-                        ControlPointType.START_FINISH -> "-"
-                        ControlPointType.CONTROL -> control.code.toString()
-                    },
-                    distance = stringResource(
-                        R.string.distance_meters_format,
-                        segment?.distanceMeters ?: 0f,
-                    ),
-                    score = if (control.type == ControlPointType.CONTROL) {
-                        control.points.toString()
-                    } else {
-                        "-"
-                    },
-                    scoreTotal = (segment?.accumulatedPoints ?: 0).toString(),
-                    isHeader = false,
+    }
+    val textMeasurer = rememberTextMeasurer()
+    val headerStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+    val bodyStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Normal)
+    val density = LocalDensity.current
+    // Share content-sized widths across the header and every row, including off-screen rows.
+    val columnWidths = remember(headers, rows, textMeasurer, headerStyle, bodyStyle, density) {
+        headers.indices.map { column ->
+            val headerWidth = textMeasurer.measure(
+                headers[column], headerStyle, softWrap = false, maxLines = 1,
+            ).size.width
+            val bodyWidth = rows.map { it[column] }.distinct().maxOfOrNull { text ->
+                textMeasurer.measure(text, bodyStyle, softWrap = false, maxLines = 1).size.width
+            } ?: 0
+            with(density) { maxOf(headerWidth, bodyWidth).toDp() }
+        }
+    }
+    val contentWidth = columnWidths.fold(40.dp + 16.dp * (headers.size - 1)) { sum, width -> sum + width }
+    BoxWithConstraints(modifier = modifier.testTag("routeStepTable")) {
+        val naturalWidth = maxOf(maxWidth, contentWidth)
+        val widthRatio = maxWidth / naturalWidth
+        // Condense by at most 10%, preserving text height and the relative column spacing.
+        // Larger overflows keep their natural size and remain horizontally scrollable.
+        val horizontalScale = if (widthRatio >= 0.9f) widthRatio else 1f
+        val horizontalState = rememberScrollState()
+        val verticalState = rememberLazyListState()
+        val tableScrollState = rememberScrollable2DState { delta ->
+            // One gesture owns both axes; the layout states clamp each axis at its bounds.
+            Offset(
+                -horizontalState.dispatchRawDelta(-delta.x),
+                -verticalState.dispatchRawDelta(-delta.y),
+            )
+        }
+        Column(
+            Modifier.horizontalScroll(horizontalState).layout { measurable, constraints ->
+                val naturalWidthPx = naturalWidth.roundToPx()
+                val placeable = measurable.measure(
+                    constraints.copy(minWidth = naturalWidthPx, maxWidth = naturalWidthPx),
                 )
-                if (index < route.path.lastIndex) HorizontalDivider()
+                layout((naturalWidthPx * horizontalScale).roundToInt(), placeable.height) {
+                    placeable.placeRelativeWithLayer(0, 0) {
+                        scaleX = horizontalScale
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    }
+                }
+            },
+        ) {
+            RouteTableRow(
+                cells = headers,
+                columnWidths = columnWidths,
+                isHeader = true,
+                modifier = Modifier.testTag("routeStepTableHeader"),
+            )
+            HorizontalDivider()
+            LazyColumn(
+                state = verticalState,
+                userScrollEnabled = false,
+                modifier = Modifier.testTag("routeStepTableBody").scrollable2D(tableScrollState),
+            ) {
+                itemsIndexed(
+                    items = route.path,
+                    key = { index, control -> "$index:${control.id}" },
+                ) { index, _ ->
+                    RouteTableRow(
+                        cells = rows[index],
+                        columnWidths = columnWidths,
+                        isHeader = false,
+                        modifier = Modifier.testTag("routeStepRow:$index"),
+                    )
+                    if (index < route.path.lastIndex) HorizontalDivider()
+                }
             }
         }
     }
@@ -653,32 +730,29 @@ fun RouteStepTable(
 
 @Composable
 private fun RouteTableRow(
-    sequence: String,
-    control: String,
-    distance: String,
-    score: String,
-    scoreTotal: String,
+    cells: List<String>,
+    columnWidths: List<Dp>,
     isHeader: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val style = if (isHeader) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium
     val weight = if (isHeader) FontWeight.SemiBold else FontWeight.Normal
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        RouteTableCell(sequence, 0.35f, style, weight)
-        RouteTableCell(control, 1.15f, style, weight)
-        RouteTableCell(distance, 0.9f, style, weight)
-        RouteTableCell(score, 0.75f, style, weight)
-        RouteTableCell(scoreTotal, 1.1f, style, weight)
+        cells.forEachIndexed { index, text ->
+            RouteTableCell(text, columnWidths[index], style, weight)
+        }
     }
 }
 
 @Composable
-private fun RowScope.RouteTableCell(
+private fun RouteTableCell(
     text: String,
-    columnWeight: Float,
+    columnWidth: Dp,
     style: androidx.compose.ui.text.TextStyle,
     fontWeight: FontWeight,
 ) {
@@ -688,6 +762,6 @@ private fun RowScope.RouteTableCell(
         fontWeight = fontWeight,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.weight(columnWeight),
+        modifier = Modifier.width(columnWidth),
     )
 }

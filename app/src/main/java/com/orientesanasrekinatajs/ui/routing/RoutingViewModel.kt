@@ -8,6 +8,11 @@ import com.orientesanasrekinatajs.domain.model.OptimizedRoute
 import com.orientesanasrekinatajs.domain.model.RouteSegment
 import com.orientesanasrekinatajs.domain.model.RouteMetadata
 import com.orientesanasrekinatajs.domain.model.RouteRestriction
+import com.orientesanasrekinatajs.domain.model.connectionKey
+import com.orientesanasrekinatajs.domain.model.blacklistedControlIds
+import com.orientesanasrekinatajs.domain.model.mandatoryPointIds
+import com.orientesanasrekinatajs.domain.model.blacklistedConnectionKeys
+import com.orientesanasrekinatajs.domain.model.mandatoryConnectionKeys
 import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
 import com.orientesanasrekinatajs.domain.model.mandatoryConnectionLimit
 import com.orientesanasrekinatajs.domain.model.mandatoryConnectionCounts
@@ -785,23 +790,13 @@ class RoutingViewModel internal constructor(
                 }
             }
         }
-        val blacklistedControls = restrictions
-            .filter { it.type == RouteRestrictionType.BLACKLIST_CONTROL }
-            .mapTo(mutableSetOf(), RouteRestriction::firstPointId)
-        val mandatoryPoints = restrictions
-            .filter { it.type == RouteRestrictionType.MANDATORY_CONTROL }
-            .mapTo(mutableSetOf(), RouteRestriction::firstPointId)
-        restrictions.filter { it.type == RouteRestrictionType.MANDATORY_CONNECTION }
-            .forEach { mandatoryPoints += it.pointIds }
+        val blacklistedControls = blacklistedControlIds(restrictions)
+        val mandatoryPoints = mandatoryPointIds(restrictions)
         require(blacklistedControls.intersect(mandatoryPoints).isEmpty()) {
             "A point cannot be both blacklisted and mandatory"
         }
-        val blacklistedConnections = restrictions
-            .filter { it.type == RouteRestrictionType.BLACKLIST_CONNECTION }
-            .mapTo(mutableSetOf()) { it.connectionKey() }
-        val mandatoryConnections = restrictions
-            .filter { it.type == RouteRestrictionType.MANDATORY_CONNECTION }
-            .mapTo(mutableSetOf()) { it.connectionKey() }
+        val blacklistedConnections = blacklistedConnectionKeys(restrictions)
+        val mandatoryConnections = mandatoryConnectionKeys(restrictions)
         require(blacklistedConnections.intersect(mandatoryConnections).isEmpty()) {
             "A connection cannot be both blacklisted and mandatory"
         }
@@ -838,12 +833,6 @@ class RoutingViewModel internal constructor(
     private fun List<ControlPoint>.satisfiesMandatoryConnections(
         mandatory: Collection<Pair<String, String>>,
     ): Boolean = mandatory.all { connection -> hasConnection(connection) }
-
-    private fun RouteRestriction.connectionKey(): Pair<String, String> =
-        firstPointId.connectionKey(requireNotNull(secondPointId))
-
-    private fun String.connectionKey(other: String): Pair<String, String> =
-        if (this <= other) this to other else other to this
 
     private fun RouteRestriction.sameRuleAs(other: RouteRestriction): Boolean =
         type == other.type && when (type) {

@@ -12,6 +12,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -70,6 +76,8 @@ import com.orientesanasrekinatajs.ui.transfer.MapTransferEvent
 import com.orientesanasrekinatajs.ui.transfer.MapTransferUiState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+
+internal val LocalRoutePanelOpen = staticCompositionLocalOf<MutableState<Boolean>?> { null }
 
 @Composable
 fun OrienteeringApp(
@@ -178,6 +186,26 @@ fun OrienteeringApp(
     val setMapRotation: (Int) -> Unit = animateMapRotationTo
     val statusBarColor = MaterialTheme.colorScheme.surfaceContainer
     val view = LocalView.current
+    val routePanelOpen = remember { mutableStateOf(false) }
+    DisposableEffect(view, routePanelOpen.value, statusBarColor) {
+        val window = (view.context as? Activity)?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        val previousColor = window?.navigationBarColor
+        val previousContrast = window?.isNavigationBarContrastEnforced
+        val previousLight = controller?.isAppearanceLightNavigationBars
+        if (routePanelOpen.value && window != null) {
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            window.isNavigationBarContrastEnforced = false
+            controller?.isAppearanceLightNavigationBars = statusBarColor.luminance() > 0.5f
+        }
+        onDispose {
+            if (window != null && previousColor != null && previousContrast != null) {
+                window.navigationBarColor = previousColor
+                window.isNavigationBarContrastEnforced = previousContrast
+                if (previousLight != null) controller?.isAppearanceLightNavigationBars = previousLight
+            }
+        }
+    }
     SideEffect {
         val window = (view.context as? Activity)?.window ?: return@SideEffect
         WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
@@ -195,6 +223,7 @@ fun OrienteeringApp(
                     .background(statusBarColor)
                     .align(Alignment.TopCenter),
             )
+            CompositionLocalProvider(LocalRoutePanelOpen provides routePanelOpen) {
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                 when {
                 processingState.isProcessing -> ProcessingScreen(onBack = onReset)
@@ -264,6 +293,12 @@ fun OrienteeringApp(
                     onImportMap = onImportMap,
                 )
                 }
+            }
+            }
+            if (routePanelOpen.value) {
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .windowInsetsBottomHeight(WindowInsets.navigationBars)
+                    .background(MaterialTheme.colorScheme.surfaceContainer))
             }
         }
     }
@@ -340,7 +375,7 @@ fun OrienteeringApp(
 
 internal fun Modifier.clearFocusOnPointerDown(focusManager: FocusManager): Modifier = pointerInput(focusManager) {
     awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        awaitFirstDown(requireUnconsumed = true, pass = PointerEventPass.Final)
         focusManager.clearFocus(force = true)
     }
 }

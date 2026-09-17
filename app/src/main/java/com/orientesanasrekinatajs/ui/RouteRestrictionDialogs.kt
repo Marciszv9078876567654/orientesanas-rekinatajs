@@ -44,6 +44,11 @@ import com.orientesanasrekinatajs.domain.model.RouteRestriction
 import com.orientesanasrekinatajs.domain.model.RouteRestrictionType
 import com.orientesanasrekinatajs.domain.model.mandatoryConnectionLimit
 import com.orientesanasrekinatajs.domain.model.mandatoryConnectionCounts
+import com.orientesanasrekinatajs.domain.model.blacklistedControlIds
+import com.orientesanasrekinatajs.domain.model.mandatoryPointIds
+import com.orientesanasrekinatajs.domain.model.blacklistedConnectionKeys
+import com.orientesanasrekinatajs.domain.model.mandatoryConnectionKeys
+import com.orientesanasrekinatajs.domain.model.connectionKey
 import com.orientesanasrekinatajs.ui.routing.RouteRestrictionAction
 
 @Composable
@@ -203,6 +208,35 @@ internal fun AddRouteRestrictionDialog(
         }
     } else null
 
+    val blacklistedPoints = blacklistedControlIds(restrictions)
+    val mandatoryPoints = mandatoryPointIds(restrictions)
+    val conflictingPointId = if (valid) when (type) {
+        RouteRestrictionType.BLACKLIST_CONTROL -> firstPointId.takeIf { it in mandatoryPoints }
+        RouteRestrictionType.MANDATORY_CONTROL -> firstPointId.takeIf { it in blacklistedPoints }
+        RouteRestrictionType.MANDATORY_CONNECTION ->
+            listOf(firstPointId, secondPointId).firstOrNull { it in blacklistedPoints }
+        RouteRestrictionType.BLACKLIST_CONNECTION -> null
+    } else null
+    val conflictingConnection = valid && needsSecondPoint && when (type) {
+        RouteRestrictionType.BLACKLIST_CONNECTION ->
+            firstPointId.connectionKey(secondPointId) in mandatoryConnectionKeys(restrictions)
+        RouteRestrictionType.MANDATORY_CONNECTION ->
+            firstPointId.connectionKey(secondPointId) in blacklistedConnectionKeys(restrictions)
+        else -> false
+    }
+    val contradictionWarning = when {
+        conflictingPointId != null -> stringResource(
+            R.string.restriction_point_contradiction,
+            points.firstOrNull { it.id == conflictingPointId }?.let(::restrictionPointLabel).orEmpty(),
+        )
+        conflictingConnection -> stringResource(
+            R.string.restriction_connection_contradiction,
+            points.firstOrNull { it.id == firstPointId }?.let(::restrictionPointLabel).orEmpty(),
+            points.firstOrNull { it.id == secondPointId }?.let(::restrictionPointLabel).orEmpty(),
+        )
+        else -> null
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { CenteredDialogTitle(stringResource(R.string.add_restriction)) },
@@ -258,6 +292,13 @@ internal fun AddRouteRestrictionDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                if (overLimitPoint == null && contradictionWarning != null) {
+                    Text(
+                        contradictionWarning,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         },
         confirmButton = {
@@ -271,7 +312,7 @@ internal fun AddRouteRestrictionDialog(
                         ),
                     )
                 },
-                enabled = valid && overLimitPoint == null,
+                enabled = valid && overLimitPoint == null && contradictionWarning == null,
             ) { Text(stringResource(R.string.add)) }
         },
         dismissButton = {

@@ -45,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
@@ -201,6 +203,7 @@ internal fun RouteScreen(
     var pendingHomeAfterSave by rememberSaveable { mutableStateOf(false) }
     var showMapActions by rememberSaveable { mutableStateOf(false) }
     var showRouteMenu by rememberSaveable { mutableStateOf(false) }
+    var closingRouteEditor by remember { mutableStateOf(false) }
     var showRouteEditor by rememberSaveable { mutableStateOf(false) }
     var routeEditorPanelState by rememberSaveable {
         mutableStateOf(RouteEditorPanelState.HALF)
@@ -211,6 +214,12 @@ internal fun RouteScreen(
     var showRouteRestrictions by rememberSaveable { mutableStateOf(false) }
     var showEditMapRouteWarning by rememberSaveable { mutableStateOf(false) }
     var showManageRoutes by rememberSaveable { mutableStateOf(false) }
+    val routePanelOpen = LocalRoutePanelOpen.current
+    DisposableEffect(routePanelOpen, showRouteEditor, showManageRoutes) {
+        routePanelOpen?.value = showRouteEditor || showManageRoutes
+        onDispose { routePanelOpen?.value = false }
+    }
+    var manageRoutesPanelState by rememberSaveable { mutableStateOf(RouteEditorPanelState.HALF) }
     var showRouteGenerator by rememberSaveable(routeEntryKey) {
         mutableStateOf(route == null && autoOpenRouteGenerator)
     }
@@ -221,13 +230,6 @@ internal fun RouteScreen(
     var showAlternativeRoutes by rememberSaveable { mutableStateOf(false) }
     var waitingForAlternatives by rememberSaveable { mutableStateOf(false) }
     var renameText by rememberSaveable(savedMapId, savedMapName) { mutableStateOf(savedMapName.orEmpty()) }
-    BackHandler(enabled = showRouteEditor) {
-        if (routeEditorPanelState == RouteEditorPanelState.MINIMIZED) {
-            routeEditorPanelState = RouteEditorPanelState.HALF
-        } else {
-            confirmRouteEditCancel = true
-        }
-    }
     BackHandler(enabled = showDetails && !showRouteEditor) {
         routeDetailsPanelState = RouteDetailsPanelState.DISMISSED
     }
@@ -259,6 +261,12 @@ internal fun RouteScreen(
         candidate.id == selectedRouteId
     }.takeIf { it >= 0 } ?: -1
     val displayedRoute = availableRoutes.getOrNull(safeSelectedRouteIndex)
+    fun requestRouteEditCancel() {
+        if (routeEditorPath == null || routeEditorPath == displayedRoute?.path) {
+            closingRouteEditor = true
+        } else confirmRouteEditCancel = true
+    }
+    BackHandler(enabled = showRouteEditor) { requestRouteEditCancel() }
     LaunchedEffect(isGeneratingAlternatives) {
         if (!isGeneratingAlternatives && waitingForAlternatives) {
             waitingForAlternatives = false
@@ -286,14 +294,14 @@ internal fun RouteScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().testTag("route_screen")) {
     Column(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
             Box(Modifier.fillMaxWidth().height(48.dp)) {
                 IconButton(
                     onClick = {
                         if (showRouteEditor) {
-                            confirmRouteEditCancel = true
+                            requestRouteEditCancel()
                         } else if (showDetails) {
                             routeDetailsPanelState = RouteDetailsPanelState.DISMISSED
                         } else if (isSaving) {
@@ -465,6 +473,7 @@ internal fun RouteScreen(
                 onRotationGesture = onRotationGesture,
                 recenterKey = recenterKey,
                 onMapTap = {
+                    if (showManageRoutes) manageRoutesPanelState = RouteEditorPanelState.MINIMIZED
                     if (
                         showRouteEditor &&
                         routeEditorPanelState != RouteEditorPanelState.MINIMIZED
@@ -605,6 +614,8 @@ internal fun RouteScreen(
                                         },
                                         onClick = {
                                             showRouteMenu = false
+                                            showDetails = false
+                                            manageRoutesPanelState = RouteEditorPanelState.HALF
                                             showManageRoutes = true
                                         },
                                     )
@@ -632,6 +643,12 @@ internal fun RouteScreen(
 
     if (showRouteEditor && displayedRoute != null && routeEditorPath != null) {
         RouteEditorBottomSheet(
+            closing = closingRouteEditor,
+            onClosed = {
+                showRouteEditor = false
+                routeEditorPath = null
+                closingRouteEditor = false
+            },
             route = displayedRoute,
             editedPath = requireNotNull(routeEditorPath),
             allPoints = allPoints,
@@ -639,7 +656,7 @@ internal fun RouteScreen(
             onPanelStateChange = { routeEditorPanelState = it },
             onPathChange = { routeEditorPath = it },
             onSaveRequest = { confirmRouteEditSave = true },
-            onCancelRequest = { confirmRouteEditCancel = true },
+            onCancelRequest = { requestRouteEditCancel() },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
@@ -670,6 +687,23 @@ internal fun RouteScreen(
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
+    if (showManageRoutes) {
+        ManageRoutesDialog(
+            primaryRoute = route,
+            alternativeRoutes = alternativeRoutes,
+            primaryRouteIndex = nextLongestRouteCount,
+            routeMetadata = routeMetadata,
+            activeRouteId = displayedRoute?.id,
+            panelState = manageRoutesPanelState,
+            onPanelStateChange = { manageRoutesPanelState = it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+            onAction = { action ->
+                if (action is RouteManagementAction.Select) selectedRouteId = action.routeId
+                onManageRoutes(action)
+            },
+            onDismiss = { showManageRoutes = false },
+        )
+    }
     }
     if (confirmRouteEditSave && displayedRoute != null) {
         ConfirmationDialog(
@@ -686,8 +720,7 @@ internal fun RouteScreen(
                     )
                 }
                 confirmRouteEditSave = false
-                showRouteEditor = false
-                routeEditorPath = null
+                closingRouteEditor = true
             },
             onDismiss = { confirmRouteEditSave = false },
         )
@@ -698,8 +731,7 @@ internal fun RouteScreen(
             message = stringResource(R.string.cancel_route_edit_confirmation),
             onConfirm = {
                 confirmRouteEditCancel = false
-                showRouteEditor = false
-                routeEditorPath = null
+                closingRouteEditor = true
             },
             onDismiss = { confirmRouteEditCancel = false },
         )
@@ -767,16 +799,6 @@ internal fun RouteScreen(
                 onEdit()
             },
             onDismiss = { showEditMapRouteWarning = false },
-        )
-    }
-    if (showManageRoutes) {
-        ManageRoutesDialog(
-            primaryRoute = route,
-            alternativeRoutes = alternativeRoutes,
-            primaryRouteIndex = nextLongestRouteCount,
-            routeMetadata = routeMetadata,
-            onAction = onManageRoutes,
-            onDismiss = { showManageRoutes = false },
         )
     }
     if (showRename) {

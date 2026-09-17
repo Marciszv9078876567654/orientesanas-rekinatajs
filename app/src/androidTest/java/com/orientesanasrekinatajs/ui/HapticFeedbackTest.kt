@@ -77,4 +77,25 @@ class HapticFeedbackTest {
         hold()
         compose.runOnIdle { assertEquals(1, pulses) }
     }
+
+    @Test fun managedRouteHoldSignalsOnceAndObservesDisabledPreference() {
+        val route = OptimizedRoute(emptyList(), 100f, 3, emptyList(), id = "a")
+        compose.setContent {
+            CompositionLocalProvider(LocalHapticFeedback provides haptics) {
+                OrienteeringAppTheme(UserPreferences(vibrationFeedback = enabled.value)) {
+                    ManageRoutesDialog(route, listOf(route.copy(id = "b")), 0, emptyMap(), {}, {})
+                }
+            }
+        }
+        fun hold() = compose.onNodeWithTag("managed_route_drag_a").performTouchInput {
+            down(center)
+            advanceEventTime(700)
+            moveBy(Offset(0f, 2f))
+            up()
+        }
+        hold()
+        compose.runOnIdle { assertEquals(1, pulses); enabled.value = false }
+        hold()
+        compose.runOnIdle { assertEquals(1, pulses) }
+    }
 }
