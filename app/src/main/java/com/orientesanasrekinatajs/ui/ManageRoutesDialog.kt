@@ -229,9 +229,6 @@ internal fun ManageRoutesDialog(
     }
     val hasUnsavedChanges = managedRoutes.map(OptimizedRoute::id) != initialRouteKeys ||
         managedMetadata != initialMetadata
-    LaunchedEffect(focusedRouteKey) {
-        if (focusedRouteKey == null) keyboardController?.hide()
-    }
     fun clearInputFocus() {
         dialogFocusManager?.clearFocus(force = true)
         keyboardController?.hide()
@@ -244,7 +241,7 @@ internal fun ManageRoutesDialog(
     var headerHeight by remember { mutableIntStateOf(0) }
     var actionHeight by remember { mutableIntStateOf(0) }
     var footerHeight by remember { mutableIntStateOf(0) }
-    BackHandler { requestCancel() }
+    BackHandler { if (focusedRouteKey != null) clearInputFocus() else requestCancel() }
     ManageRoutesPanel(
         closing = closing,
         onClosed = onDismiss,
@@ -271,7 +268,7 @@ internal fun ManageRoutesDialog(
                         val root = backgroundCoordinates?.localToRoot(down.position)
                         if (root != null && nameFields.values.none {
                             it.isAttached && it.boundsInRoot().contains(root)
-                        }) focusManager.clearFocus(force = true)
+                        }) clearInputFocus()
                     }
                 }
                 .padding(horizontal = 16.dp, vertical = 8.dp),

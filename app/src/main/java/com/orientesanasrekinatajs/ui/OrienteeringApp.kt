@@ -9,7 +9,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.navigationBars
@@ -224,7 +228,12 @@ fun OrienteeringApp(
                     .align(Alignment.TopCenter),
             )
             CompositionLocalProvider(LocalRoutePanelOpen provides routePanelOpen) {
-            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+            // Route panels handle the animated keyboard inset themselves. Including it
+            // here also shrinks their screen anchors and restarts their settling animation.
+            val screenInsets = if (routePanelOpen.value) {
+                WindowInsets.systemBars.union(WindowInsets.displayCutout)
+            } else WindowInsets.safeDrawing
+            Box(Modifier.fillMaxSize().windowInsetsPadding(screenInsets)) {
                 when {
                 processingState.isProcessing -> ProcessingScreen(onBack = onReset)
                 processingState.error != null && processingState.manualBoundaryRequired &&

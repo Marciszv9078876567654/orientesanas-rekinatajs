@@ -46,4 +46,13 @@ class PanelSettlingTest {
         assertEquals(1, settledPanelIndex(heights, 1, 540f, -40f, 500f, 1f))
         assertEquals(1, settledPanelIndex(heights, 1, 460f, 40f, -500f, 1f))
     }
-}
+    @Test fun detailsCloseWithShortPullOrDownwardFlickBelowCompactHeight() {
+        fun closes(height: Float, distance: Float, speed: Float) =
+            com.orientesanasrekinatajs.ui.components.shouldDismissRouteDetails(
+                160f, height, distance, speed, 1f)
+        assertEquals(true, closes(110f, 50f, 0f))
+        assertEquals(true, closes(150f, 10f, 500f))
+        assertEquals(false, closes(150f, 10f, 100f))
+        assertEquals(false, closes(150f, 10f, -500f))
+        assertEquals(false, closes(490f, 10f, 500f))
+    }}

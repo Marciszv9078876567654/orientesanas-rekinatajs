@@ -15,9 +15,14 @@ internal fun panelExitModifier(closing: Boolean, onClosed: () -> Unit): Modifier
     val latestOnClosed by rememberUpdatedState(onClosed)
     LaunchedEffect(closing, animationsEnabled) {
         if (closing) {
-            if (animationsEnabled) progress.animateTo(1f, tween(180))
+            if (animationsEnabled) progress.animateTo(1f, routePanelMotion())
             latestOnClosed()
         } else progress.snapTo(0f)
     }
     return Modifier.graphicsLayer { translationY = size.height * progress.value }
 }
+
+internal fun routePanelMotion() = tween<Float>(
+    durationMillis = 240,
+    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+)

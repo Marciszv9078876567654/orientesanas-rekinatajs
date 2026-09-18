@@ -19,3 +19,16 @@ internal fun settledPanelIndex(
         (currentIndex + if (velocity < 0f) 1 else -1).coerceIn(heights.indices)
     } else nearest
 }
+
+/** Dismiss after a modest pull below the compact anchor, or a downward flick there. */
+internal fun shouldDismissRouteDetails(
+    minimumHeight: Float,
+    releasedHeight: Float,
+    dragDistance: Float,
+    velocity: Float,
+    density: Float,
+): Boolean {
+    if (dragDistance <= 0f) return false
+    return releasedHeight <= minimumHeight * 0.7f ||
+        (releasedHeight < minimumHeight && dragDistance >= 8f * density && velocity >= 400f * density)
+}

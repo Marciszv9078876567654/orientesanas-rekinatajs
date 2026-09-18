@@ -138,7 +138,7 @@ fun RouteDetailsBottomSheet(
             RouteDetailsPanelState.EXPANDED -> maximumHeightPx
             RouteDetailsPanelState.DISMISSED -> 0f
         }
-        var panelHeightPx by remember(constraints.maxHeight) { mutableFloatStateOf(0f) }
+        var panelHeightPx by remember { mutableFloatStateOf(0f) }
         var dragDistanceY by remember { mutableFloatStateOf(0f) }
         var isDetailsDragging by remember { mutableStateOf(false) }
         var settleRequest by remember { androidx.compose.runtime.mutableIntStateOf(0) }
@@ -158,7 +158,7 @@ fun RouteDetailsBottomSheet(
                 animate(
                     initialValue = panelHeightPx,
                     targetValue = targetHeightPx,
-                    animationSpec = tween(240),
+                    animationSpec = routePanelMotion(),
                 ) { value, _ -> panelHeightPx = value }
             }
             if (panelState == RouteDetailsPanelState.DISMISSED) onDismissRequest()
@@ -169,7 +169,7 @@ fun RouteDetailsBottomSheet(
         }
         val fadeDistancePx = with(density) { 36.dp.toPx() }
         val detailsAlpha = ((panelHeightPx - minimumHeightPx) / fadeDistancePx).coerceIn(0f, 1f)
-        val dismissHeightPx = minimumHeightPx * 0.35f
+
         val fullScreenProgress = if (maximumHeightPx > halfHeightPx) {
             ((panelHeightPx - halfHeightPx) / (maximumHeightPx - halfHeightPx)).coerceIn(0f, 1f)
         } else {
@@ -200,7 +200,7 @@ fun RouteDetailsBottomSheet(
                     orientation = Orientation.Vertical,
                     onDragStarted = { isDetailsDragging = true; dragDistanceY = 0f },
                     onDragStopped = { velocity ->
-                        if (dragDistanceY > 0f && panelHeightPx <= dismissHeightPx) {
+                        if (shouldDismissRouteDetails(minimumHeightPx, panelHeightPx, dragDistanceY, velocity, density.density)) {
                             onPanelStateChange(RouteDetailsPanelState.DISMISSED)
                         } else {
                             val states = listOf(RouteDetailsPanelState.MINIMIZED, RouteDetailsPanelState.HALF, RouteDetailsPanelState.EXPANDED)
@@ -432,7 +432,7 @@ fun RouteEditorBottomSheet(
             RouteEditorPanelState.HALF -> halfHeightPx
             RouteEditorPanelState.EXPANDED -> maximumHeightPx
         }
-        var panelHeightPx by remember(constraints.maxHeight) { mutableFloatStateOf(0f) }
+        var panelHeightPx by remember { mutableFloatStateOf(0f) }
         var dragDistanceY by remember { mutableFloatStateOf(0f) }
         var isPanelDragging by remember { mutableStateOf(false) }
         LaunchedEffect(
@@ -450,7 +450,7 @@ fun RouteEditorBottomSheet(
                 animate(
                     initialValue = panelHeightPx,
                     targetValue = targetHeightPx,
-                    animationSpec = tween(180),
+                    animationSpec = routePanelMotion(),
                 ) { value, _ -> panelHeightPx = value }
             }
         }

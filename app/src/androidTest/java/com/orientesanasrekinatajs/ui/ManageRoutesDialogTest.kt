@@ -1,5 +1,6 @@
 package com.orientesanasrekinatajs.ui
 
+import androidx.compose.foundation.layout.ime
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
@@ -32,9 +33,13 @@ class ManageRoutesDialogTest {
 
     private fun label(id: Int) = InstrumentationRegistry.getInstrumentation().targetContext.getString(id)
 
+    @Volatile private var keyboardInset = 0
+
     private fun showRoutes(count: Int = 3) {
         val routes = (0 until count).map { OptimizedRoute(emptyList(), 100f, 0, emptyList(), id = "r$it") }
         composeRule.setContent {
+            val inset = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current)
+            androidx.compose.runtime.SideEffect { keyboardInset = inset }
             OrienteeringAppTheme(UserPreferences()) {
                 ManageRoutesDialog(routes[0], routes.drop(1), 0,
                     routes.associate { it.id to RouteMetadata(name = "Route ${it.id}") }, {}, {})
@@ -95,6 +100,12 @@ class ManageRoutesDialogTest {
         showRoutes()
         composeRule.onNodeWithTag("managed_route_name_0").performTextReplacement("Changed route")
         composeRule.onNodeWithTag("manage_routes_title").performTouchInput { click() }
+        // Compose idleness does not wait for the system keyboard's closing animation.
+        composeRule.waitUntil(5_000) {
+            val bottom = composeRule.onNodeWithTag("manage_routes_panel").fetchSemanticsNode().boundsInRoot.bottom
+            val screenBottom = composeRule.onRoot().fetchSemanticsNode().boundsInRoot.bottom
+            kotlin.math.abs(bottom - screenBottom) < 2f
+        }
         val initial = composeRule.onNodeWithTag("manage_routes_panel").fetchSemanticsNode().boundsInRoot
         composeRule.onNodeWithTag("manage_routes_title").performTouchInput {
             down(center)
@@ -140,6 +151,8 @@ class ManageRoutesDialogTest {
         val route = OptimizedRoute(listOf(start, finish), 100f, 0, emptyList())
 
         composeRule.setContent {
+            val inset = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current)
+            androidx.compose.runtime.SideEffect { keyboardInset = inset }
             OrienteeringAppTheme(UserPreferences()) {
                 ManageRoutesDialog(
                     primaryRoute = route,
@@ -169,4 +182,24 @@ class ManageRoutesDialogTest {
 
         composeRule.onNodeWithTag("managed_route_name_0").assertIsNotFocused()
     }
-}
+    @Test fun repeatedKeyboardCyclesKeepPanelAttachedAndRetainName() {
+        showRoutes()
+        repeat(4) { cycle ->
+            composeRule.onNodeWithTag("managed_route_name_0").performClick()
+            composeRule.waitUntil(5_000) { keyboardInset > 0 }
+            composeRule.onNodeWithTag("managed_route_name_0").performTextReplacement("Rename $cycle")
+            composeRule.waitUntil(5_000) {
+                val panel = composeRule.onNodeWithTag("manage_routes_panel").fetchSemanticsNode().boundsInRoot
+                val root = composeRule.onRoot().fetchSemanticsNode().boundsInRoot
+                kotlin.math.abs(panel.bottom - (root.bottom - keyboardInset)) < 2f
+            }
+            composeRule.onNodeWithTag("manage_routes_title").performTouchInput { click() }
+            composeRule.waitUntil(5_000) { keyboardInset == 0 }
+            composeRule.waitUntil(5_000) {
+                val panel = composeRule.onNodeWithTag("manage_routes_panel").fetchSemanticsNode().boundsInRoot
+                val root = composeRule.onRoot().fetchSemanticsNode().boundsInRoot
+                kotlin.math.abs(panel.bottom - root.bottom) < 2f
+            }
+            composeRule.onNodeWithTag("managed_route_name_0").assertTextContains("Rename $cycle")
+        }
+    }}
